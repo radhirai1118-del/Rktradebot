@@ -1,0 +1,342 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  background: #080d18;
+  color: #ffffff;
+  min-height: 100vh;
+}
+
+.app {
+  width: min(1150px, 94%);
+  margin: 25px auto 50px;
+}
+
+
+/* HEADER */
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.topbar h1 {
+  font-size: 28px;
+}
+
+.topbar p {
+  margin-top: 5px;
+  color: #8e99ad;
+  font-size: 14px;
+}
+
+
+/* STATUS */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: bold;
+  font-size: 13px;
+}
+
+#statusDot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #777;
+}
+
+
+/* PANELS */
+
+.panel {
+  background: #121a2b;
+  border: 1px solid #202a40;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 18px;
+}
+
+.panel h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+
+/* CONTROLS */
+
+.controls {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1.3fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.field label {
+  font-size: 12px;
+  color: #8e99ad;
+}
+
+select,
+input {
+  width: 100%;
+  padding: 12px;
+  background: #1c263b;
+  color: #ffffff;
+  border: 1px solid #2b3751;
+  border-radius: 9px;
+  outline: none;
+}
+
+select:focus,
+input:focus {
+  border-color: #4d8cff;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  border: none;
+  border-radius: 9px;
+  padding: 12px 17px;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover {
+  opacity: .85;
+}
+
+.start {
+  background: #168c59;
+}
+
+.stop {
+  background: #c83f4a;
+}
+
+.clear {
+  background: #34415a;
+}
+
+
+/* CARDS */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.card {
+  background: #121a2b;
+  border: 1px solid #202a40;
+  border-radius: 13px;
+  padding: 17px;
+}
+
+.card span {
+  display: block;
+  color: #8e99ad;
+  font-size: 12px;
+  margin-bottom: 9px;
+}
+
+.card strong {
+  font-size: 20px;
+}
+
+
+/* PRICE */
+
+.price-panel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.muted {
+  color: #8e99ad;
+  font-size: 12px;
+}
+
+.price-panel h2 {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+
+/* INDICATORS */
+
+.indicator-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.indicator {
+  background: #1a2438;
+  border-radius: 11px;
+  padding: 17px;
+  border: 1px solid #27334b;
+}
+
+.indicator span {
+  display: block;
+  color: #8e99ad;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.indicator strong {
+  font-size: 17px;
+}
+
+
+/* SIGNAL */
+
+.signal-panel {
+  text-align: center;
+}
+
+#signalMessage {
+  background: #1a2438;
+  border-radius: 11px;
+  padding: 22px;
+  color: #dbe3f3;
+  font-size: 15px;
+}
+
+
+/* JOURNAL */
+
+.journal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 750px;
+}
+
+th,
+td {
+  padding: 12px;
+  border-bottom: 1px solid #27334b;
+  text-align: center;
+  font-size: 13px;
+}
+
+th {
+  color: #8e99ad;
+  font-size: 12px;
+}
+
+
+/* MOBILE */
+
+@media (max-width: 900px) {
+
+  .controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .buttons {
+    grid-column: span 2;
+  }
+
+  .buttons button {
+    flex: 1;
+  }
+
+  .cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .indicator-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+}
+
+
+@media (max-width: 600px) {
+
+  .app {
+    width: 94%;
+    margin-top: 15px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+  }
+
+  .status {
+    font-size: 11px;
+  }
+
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .buttons {
+    grid-column: auto;
+  }
+
+  .cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .price-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+}
+
+
+@media (max-width: 380px) {
+
+  .indicator-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+}
