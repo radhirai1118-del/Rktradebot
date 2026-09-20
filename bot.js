@@ -1,487 +1,1291 @@
 (() => {
+
   "use strict";
 
-  // Prevent duplicate installation
-  if (window.__RK_INDICATORS__) {
-    window.__RK_INDICATORS__.toggle();
-    return;
-  }
 
-  const RK = {
-    prices: [],
-    timeframe: "1m",
-    panel: null,
+  /* =========================================================
+     RK TRADE BOT
+     PAPER TRADING / EDUCATIONAL VERSION
+     ========================================================= */
 
-    toggle() {
-      if (!this.panel) return;
-      this.panel.style.display =
-        this.panel.style.display === "none" ? "block" : "none";
-    },
 
-    ema(data, period) {
-      if (data.length < period) return null;
+  const CONFIG = {
 
-      const multiplier = 2 / (period + 1);
-      let ema = data.slice(0, period)
-        .reduce((a, b) => a + b, 0) / period;
+    startingBalance: 10000,
 
-      for (let i = period; i < data.length; i++) {
-        ema = ((data[i] - ema) * multiplier) + ema;
-      }
+    candleCount: 250,
 
-      return ema;
-    },
+    updateInterval: 5000,
 
-    sma(data, period) {
-      if (data.length < period) return null;
+    payout: 0.80,
 
-      const values = data.slice(-period);
-      return values.reduce((a, b) => a + b, 0) / period;
-    },
+    storageKey: "RK_TRADE_BOT_STATE"
 
-    rsi(data, period = 14) {
-      if (data.length < period + 1) return null;
-
-      let gains = 0;
-      let losses = 0;
-
-      for (let i = data.length - period; i < data.length; i++) {
-        const change = data[i] - data[i - 1];
-
-        if (change > 0) gains += change;
-        else losses += Math.abs(change);
-      }
-
-      if (losses === 0) return 100;
-
-      const rs = gains / losses;
-      return 100 - (100 / (1 + rs));
-    },
-
-    macd(data) {
-      if (data.length < 26) return null;
-
-      const ema12 = this.ema(data, 12);
-      const ema26 = this.ema(data, 26);
-
-      if (ema12 === null || ema26 === null) return null;
-
-      return ema12 - ema26;
-    },
-
-    bollinger(data, period = 20, multiplier = 2) {
-      if (data.length < period) return null;
-
-      const values = data.slice(-period);
-      const mean =
-        values.reduce((a, b) => a + b, 0) / period;
-
-      const variance =
-        values.reduce((sum, value) =>
-          sum + Math.pow(value - mean, 2), 0
-        ) / period;
-
-      const sd = Math.sqrt(variance);
-
-      return {
-        middle: mean,
-        upper: mean + multiplier * sd,
-        lower: mean - multiplier * sd
-      };
-    },
-
-    stochastic(data, period = 14) {
-      if (data.length < period) return null;
-
-      const values = data.slice(-period);
-      const high = Math.max(...values);
-      const low = Math.min(...values);
-      const current = values[values.length - 1];
-
-      if (high === low) return 50;
-
-      return ((current - low) / (high - low)) * 100;
-    },
-
-    analyze() {
-      const p = this.prices;
-
-      if (p.length < 26) {
-        return {
-          status: "Need more data",
-          detail: `Add at least 26 closing prices. Current: ${p.length}`
-        };
-      }
-
-      const current = p[p.length - 1];
-
-      const rsi = this.rsi(p);
-      const ema9 = this.ema(p, 9);
-      const ema21 = this.ema(p, 21);
-      const sma20 = this.sma(p, 20);
-      const macd = this.macd(p);
-      const bb = this.bollinger(p);
-      const stoch = this.stochastic(p);
-
-      let bullish = 0;
-      let bearish = 0;
-
-      if (rsi !== null) {
-        if (rsi > 50) bullish++;
-        if (rsi < 50) bearish++;
-      }
-
-      if (ema9 !== null && ema21 !== null) {
-        if (ema9 > ema21) bullish++;
-        if (ema9 < ema21) bearish++;
-      }
-
-      if (macd !== null) {
-        if (macd > 0) bullish++;
-        if (macd < 0) bearish++;
-      }
-
-      if (stoch !== null) {
-        if (stoch > 50) bullish++;
-        if (stoch < 50) bearish++;
-      }
-
-      if (bb) {
-        if (current > bb.middle) bullish++;
-        if (current < bb.middle) bearish++;
-      }
-
-      let signal = "WAIT";
-
-      if (bullish >= 4 && bullish > bearish) {
-        signal = "BULLISH";
-      } else if (bearish >= 4 && bearish > bullish) {
-        signal = "BEARISH";
-      }
-
-      return {
-        status: signal,
-        current,
-        rsi,
-        ema9,
-        ema21,
-        sma20,
-        macd,
-        bb,
-        stoch,
-        bullish,
-        bearish
-      };
-    },
-
-    parsePrices() {
-      const input = document.getElementById("rk-price-input");
-
-      if (!input) return;
-
-      const prices = input.value
-        .split(/[\s,;]+/)
-        .map(Number)
-        .filter(Number.isFinite);
-
-      this.prices = prices;
-
-      this.renderAnalysis();
-    },
-
-    clearPrices() {
-      this.prices = [];
-
-      const input = document.getElementById("rk-price-input");
-
-      if (input) input.value = "";
-
-      this.renderAnalysis();
-    },
-
-    renderAnalysis() {
-      const result = this.analyze();
-
-      const box = document.getElementById("rk-analysis");
-
-      if (!box) return;
-
-      if (result.status === "Need more data") {
-        box.innerHTML = `
-          <div class="rk-status rk-neutral">
-            ${result.detail}
-          </div>
-        `;
-        return;
-      }
-
-      const fmt = v =>
-        v === null || v === undefined
-          ? "—"
-          : Number(v).toFixed(4);
-
-      let cls = "rk-neutral";
-
-      if (result.status === "BULLISH") cls = "rk-bull";
-      if (result.status === "BEARISH") cls = "rk-bear";
-
-      box.innerHTML = `
-        <div class="rk-status ${cls}">
-          ${result.status}
-        </div>
-
-        <div class="rk-grid">
-          <div>Price</div>
-          <div>${fmt(result.current)}</div>
-
-          <div>RSI 14</div>
-          <div>${fmt(result.rsi)}</div>
-
-          <div>EMA 9</div>
-          <div>${fmt(result.ema9)}</div>
-
-          <div>EMA 21</div>
-          <div>${fmt(result.ema21)}</div>
-
-          <div>SMA 20</div>
-          <div>${fmt(result.sma20)}</div>
-
-          <div>MACD</div>
-          <div>${fmt(result.macd)}</div>
-
-          <div>Stochastic</div>
-          <div>${fmt(result.stoch)}</div>
-
-          <div>BB Upper</div>
-          <div>${result.bb ? fmt(result.bb.upper) : "—"}</div>
-
-          <div>BB Middle</div>
-          <div>${result.bb ? fmt(result.bb.middle) : "—"}</div>
-
-          <div>BB Lower</div>
-          <div>${result.bb ? fmt(result.bb.lower) : "—"}</div>
-        </div>
-
-        <div class="rk-score">
-          Bullish factors: ${result.bullish}<br>
-          Bearish factors: ${result.bearish}
-        </div>
-
-        <div class="rk-warning">
-          Analysis only — not a guaranteed outcome or
-          prediction of the next trade.
-        </div>
-      `;
-    },
-
-    createUI() {
-      const style = document.createElement("style");
-
-      style.textContent = `
-        #rk-indicators {
-          position: fixed;
-          top: 20px;
-          right: 20px;
-          width: 340px;
-          max-height: 90vh;
-          overflow: auto;
-          z-index: 2147483647;
-          background: #101318;
-          color: #fff;
-          border: 1px solid #343943;
-          border-radius: 14px;
-          padding: 16px;
-          font-family: Arial, sans-serif;
-          box-shadow: 0 10px 40px rgba(0,0,0,.45);
-        }
-
-        #rk-indicators * {
-          box-sizing: border-box;
-        }
-
-        .rk-title {
-          font-size: 20px;
-          font-weight: 700;
-          margin-bottom: 4px;
-        }
-
-        .rk-subtitle {
-          color: #9ca3af;
-          font-size: 12px;
-          margin-bottom: 14px;
-        }
-
-        #rk-price-input {
-          width: 100%;
-          height: 100px;
-          resize: vertical;
-          background: #181c23;
-          color: white;
-          border: 1px solid #363b46;
-          border-radius: 8px;
-          padding: 10px;
-          outline: none;
-        }
-
-        .rk-buttons {
-          display: flex;
-          gap: 8px;
-          margin-top: 8px;
-        }
-
-        .rk-buttons button {
-          flex: 1;
-          padding: 9px;
-          border: 0;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 600;
-        }
-
-        .rk-primary {
-          background: #fff;
-          color: #111;
-        }
-
-        .rk-secondary {
-          background: #292e38;
-          color: white;
-        }
-
-        .rk-status {
-          margin-top: 14px;
-          padding: 12px;
-          border-radius: 8px;
-          text-align: center;
-          font-size: 18px;
-          font-weight: 700;
-        }
-
-        .rk-bull {
-          background: rgba(34,197,94,.15);
-          color: #4ade80;
-        }
-
-        .rk-bear {
-          background: rgba(239,68,68,.15);
-          color: #f87171;
-        }
-
-        .rk-neutral {
-          background: rgba(156,163,175,.12);
-          color: #d1d5db;
-        }
-
-        .rk-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 1px;
-          margin-top: 12px;
-          background: #303540;
-          border-radius: 8px;
-          overflow: hidden;
-        }
-
-        .rk-grid div {
-          background: #181c23;
-          padding: 8px;
-          font-size: 12px;
-        }
-
-        .rk-grid div:nth-child(even) {
-          text-align: right;
-        }
-
-        .rk-score {
-          margin-top: 12px;
-          padding: 10px;
-          background: #181c23;
-          border-radius: 8px;
-          font-size: 12px;
-          line-height: 1.7;
-        }
-
-        .rk-warning {
-          margin-top: 10px;
-          color: #fbbf24;
-          font-size: 10px;
-          line-height: 1.4;
-        }
-      `;
-
-      document.head.appendChild(style);
-
-      const panel = document.createElement("div");
-
-      panel.id = "rk-indicators";
-
-      panel.innerHTML = `
-        <div class="rk-title">RK Indicators</div>
-        <div class="rk-subtitle">
-          Paper-analysis prototype
-        </div>
-
-        <textarea
-          id="rk-price-input"
-          placeholder="Paste closing prices here, newest last.
-
-Example:
-1.0821
-1.0824
-1.0822
-1.0827
-..."
-        ></textarea>
-
-        <div class="rk-buttons">
-          <button class="rk-primary" id="rk-analyze">
-            Analyze
-          </button>
-
-          <button class="rk-secondary" id="rk-clear">
-            Clear
-          </button>
-
-          <button class="rk-secondary" id="rk-close">
-            Hide
-          </button>
-        </div>
-
-        <div id="rk-analysis">
-          <div class="rk-status rk-neutral">
-            Waiting for price data
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(panel);
-
-      document
-        .getElementById("rk-analyze")
-        .onclick = () => this.parsePrices();
-
-      document
-        .getElementById("rk-clear")
-        .onclick = () => this.clearPrices();
-
-      document
-        .getElementById("rk-close")
-        .onclick = () => this.toggle();
-
-      this.panel = panel;
-    },
-
-    init() {
-      this.createUI();
-
-      window.__RK_INDICATORS__ = this;
-
-      console.log(
-        "RK Indicators initialized in paper-analysis mode."
-      );
-    }
   };
 
-  RK.init();
+
+  let running = false;
+
+  let timer = null;
+
+  let balance = CONFIG.startingBalance;
+
+  let trades = [];
+
+  let wins = 0;
+
+  let losses = 0;
+
+  let candles = [];
+
+
+  /* =========================================================
+     HELPERS
+     ========================================================= */
+
+  const $ = id =>
+    document.getElementById(id);
+
+
+  function random(min, max) {
+
+    return Math.random() * (max - min) + min;
+
+  }
+
+
+  function formatPrice(value) {
+
+    return Number(value).toFixed(5);
+
+  }
+
+
+  function formatMoney(value) {
+
+    return "$" + Number(value).toFixed(2);
+
+  }
+
+
+  /* =========================================================
+     SIMULATED MARKET
+     ========================================================= */
+
+  const basePrices = {
+
+    "EUR/USD": 1.10000,
+    "GBP/USD": 1.30000,
+    "USD/JPY": 148.000,
+    "USD/CHF": 0.85000,
+    "AUD/USD": 0.66000,
+    "USD/CAD": 1.36000,
+    "NZD/USD": 0.61000,
+
+    "EUR/GBP": 0.85000,
+    "EUR/JPY": 163.000,
+    "EUR/CHF": 0.94000,
+    "EUR/AUD": 1.66000,
+    "EUR/CAD": 1.50000,
+    "EUR/NZD": 1.80000,
+
+    "GBP/JPY": 193.000,
+    "GBP/CHF": 1.10000,
+    "GBP/AUD": 1.97000,
+    "GBP/CAD": 1.77000,
+    "GBP/NZD": 2.13000,
+
+    "AUD/JPY": 98.000,
+    "AUD/CHF": 0.56000,
+    "AUD/CAD": 0.90000,
+    "AUD/NZD": 1.08000,
+
+    "NZD/JPY": 90.000,
+    "NZD/CHF": 0.52000,
+    "NZD/CAD": 0.83000,
+
+    "CAD/JPY": 109.000,
+    "CAD/CHF": 0.62500,
+    "CHF/JPY": 175.000
+
+  };
+
+
+  function generateCandles(pair) {
+
+    let price =
+      basePrices[pair] || 1.10000;
+
+    const result = [];
+
+    for (let i = 0; i < CONFIG.candleCount; i++) {
+
+      const open = price;
+
+      const volatility =
+        price * random(0.0001, 0.001);
+
+      const movement =
+        random(-volatility, volatility);
+
+      const close =
+        open + movement;
+
+      const high =
+        Math.max(open, close) +
+        random(0, volatility * 0.5);
+
+      const low =
+        Math.min(open, close) -
+        random(0, volatility * 0.5);
+
+      result.push({
+
+        time:
+          Date.now() -
+          (CONFIG.candleCount - i) * 60000,
+
+        open,
+        high,
+        low,
+        close
+
+      });
+
+      price = close;
+
+    }
+
+    return result;
+
+  }
+
+
+  /* =========================================================
+     SMA
+     ========================================================= */
+
+  function SMA(values, period) {
+
+    if (values.length < period)
+      return null;
+
+    const slice =
+      values.slice(-period);
+
+    return (
+      slice.reduce(
+        (sum, value) => sum + value,
+        0
+      ) / period
+    );
+
+  }
+
+
+  /* =========================================================
+     EMA
+     ========================================================= */
+
+  function EMA(values, period) {
+
+    if (values.length < period)
+      return null;
+
+    const multiplier =
+      2 / (period + 1);
+
+    let result =
+      values
+        .slice(0, period)
+        .reduce(
+          (a, b) => a + b,
+          0
+        ) / period;
+
+    for (
+      let i = period;
+      i < values.length;
+      i++
+    ) {
+
+      result =
+        (
+          (values[i] - result) *
+          multiplier
+        ) + result;
+
+    }
+
+    return result;
+
+  }
+
+
+  /* =========================================================
+     RSI
+     ========================================================= */
+
+  function RSI(values, period = 14) {
+
+    if (values.length <= period)
+      return null;
+
+    let gains = 0;
+
+    let lossesValue = 0;
+
+    for (
+      let i = values.length - period;
+      i < values.length;
+      i++
+    ) {
+
+      const change =
+        values[i] - values[i - 1];
+
+      if (change > 0)
+        gains += change;
+
+      else
+        lossesValue += Math.abs(change);
+
+    }
+
+    if (lossesValue === 0)
+      return 100;
+
+    const rs =
+      gains / lossesValue;
+
+    return (
+      100 -
+      (100 / (1 + rs))
+    );
+
+  }
+
+
+  /* =========================================================
+     MACD
+     ========================================================= */
+
+  function MACD(values) {
+
+    const ema12 =
+      EMA(values, 12);
+
+    const ema26 =
+      EMA(values, 26);
+
+    if (
+      ema12 === null ||
+      ema26 === null
+    )
+      return null;
+
+    return ema12 - ema26;
+
+  }
+
+
+  /* =========================================================
+     BOLLINGER BANDS
+     ========================================================= */
+
+  function Bollinger(values, period = 20) {
+
+    if (values.length < period)
+      return null;
+
+    const slice =
+      values.slice(-period);
+
+    const middle =
+      slice.reduce(
+        (a, b) => a + b,
+        0
+      ) / period;
+
+    const variance =
+      slice.reduce(
+        (sum, value) =>
+          sum +
+          Math.pow(
+            value - middle,
+            2
+          ),
+        0
+      ) / period;
+
+    const deviation =
+      Math.sqrt(variance);
+
+    return {
+
+      middle,
+
+      upper:
+        middle +
+        deviation * 2,
+
+      lower:
+        middle -
+        deviation * 2
+
+    };
+
+  }
+
+
+  /* =========================================================
+     STOCHASTIC
+     ========================================================= */
+
+  function Stochastic(
+    candleData,
+    period = 14
+  ) {
+
+    if (
+      candleData.length <
+      period
+    )
+      return null;
+
+    const slice =
+      candleData.slice(-period);
+
+    const highest =
+      Math.max(
+        ...slice.map(
+          c => c.high
+        )
+      );
+
+    const lowest =
+      Math.min(
+        ...slice.map(
+          c => c.low
+        )
+      );
+
+    const current =
+      slice[
+        slice.length - 1
+      ].close;
+
+    if (highest === lowest)
+      return 50;
+
+    return (
+      (
+        (current - lowest) /
+        (highest - lowest)
+      ) * 100
+    );
+
+  }
+
+
+  /* =========================================================
+     ATR
+     ========================================================= */
+
+  function ATR(
+    candleData,
+    period = 14
+  ) {
+
+    if (
+      candleData.length <= period
+    )
+      return null;
+
+    const ranges = [];
+
+    for (
+      let i =
+        candleData.length - period;
+      i < candleData.length;
+      i++
+    ) {
+
+      const current =
+        candleData[i];
+
+      const previous =
+        candleData[i - 1] ||
+        current;
+
+      const trueRange =
+        Math.max(
+
+          current.high -
+          current.low,
+
+          Math.abs(
+            current.high -
+            previous.close
+          ),
+
+          Math.abs(
+            current.low -
+            previous.close
+          )
+
+        );
+
+      ranges.push(
+        trueRange
+      );
+
+    }
+
+    return (
+      ranges.reduce(
+        (a, b) => a + b,
+        0
+      ) / ranges.length
+    );
+
+  }
+
+
+  /* =========================================================
+     ANALYSIS ENGINE
+     ========================================================= */
+
+  function analyze() {
+
+    const closes =
+      candles.map(
+        c => c.close
+      );
+
+    const current =
+      closes[closes.length - 1];
+
+
+    const rsi =
+      RSI(closes, 14);
+
+    const ema9 =
+      EMA(closes, 9);
+
+    const ema21 =
+      EMA(closes, 21);
+
+    const macd =
+      MACD(closes);
+
+    const bb =
+      Bollinger(closes, 20);
+
+    const stochastic =
+      Stochastic(
+        candles,
+        14
+      );
+
+    const sma50 =
+      SMA(closes, 50);
+
+    const atr =
+      ATR(candles, 14);
+
+
+    let bullish = 0;
+
+    let bearish = 0;
+
+
+    /* EMA */
+
+    if (
+      ema9 !== null &&
+      ema21 !== null
+    ) {
+
+      if (ema9 > ema21)
+        bullish++;
+
+      else
+        bearish++;
+
+    }
+
+
+    /* MACD */
+
+    if (macd !== null) {
+
+      if (macd > 0)
+        bullish++;
+
+      else
+        bearish++;
+
+    }
+
+
+    /* SMA */
+
+    if (sma50 !== null) {
+
+      if (current > sma50)
+        bullish++;
+
+      else
+        bearish++;
+
+    }
+
+
+    /* RSI */
+
+    if (rsi !== null) {
+
+      if (rsi < 30)
+        bullish++;
+
+      else if (rsi > 70)
+        bearish++;
+
+    }
+
+
+    /* STOCHASTIC */
+
+    if (stochastic !== null) {
+
+      if (stochastic < 20)
+        bullish++;
+
+      else if (stochastic > 80)
+        bearish++;
+
+    }
+
+
+    /* BOLLINGER */
+
+    if (bb) {
+
+      if (current <= bb.lower)
+        bullish++;
+
+      else if (current >= bb.upper)
+        bearish++;
+
+    }
+
+
+    /* MOMENTUM */
+
+    if (closes.length >= 4) {
+
+      const previous =
+        closes[
+          closes.length - 4
+        ];
+
+      if (current > previous)
+        bullish++;
+
+      else
+        bearish++;
+
+    }
+
+
+    const totalSignals = 7;
+
+    const strongest =
+      Math.max(
+        bullish,
+        bearish
+      );
+
+    const confidence =
+      Math.round(
+        (
+          strongest /
+          totalSignals
+        ) * 100
+      );
+
+
+    let signal = "WAIT";
+
+
+    if (
+      bullish > bearish
+    )
+      signal = "UP";
+
+
+    if (
+      bearish > bullish
+    )
+      signal = "DOWN";
+
+
+    return {
+
+      signal,
+
+      confidence,
+
+      bullish,
+
+      bearish,
+
+      current,
+
+      rsi,
+
+      ema9,
+
+      ema21,
+
+      macd,
+
+      bb,
+
+      stochastic,
+
+      sma50,
+
+      atr
+
+    };
+
+  }
+
+
+  /* =========================================================
+     UPDATE UI
+     ========================================================= */
+
+  function updateUI(result) {
+
+    const pair =
+      $("pair").value;
+
+
+    $("selectedPair")
+      .textContent = pair;
+
+
+    $("price")
+      .textContent =
+      formatPrice(
+        result.current
+      );
+
+
+    $("lastUpdate")
+      .textContent =
+      new Date()
+        .toLocaleTimeString();
+
+
+    $("signal")
+      .textContent =
+      result.signal;
+
+
+    $("confidenceValue")
+      .textContent =
+      result.confidence +
+      "%";
+
+
+    $("rsi")
+      .textContent =
+      result.rsi === null
+        ? "--"
+        : result.rsi.toFixed(2);
+
+
+    $("ema9")
+      .textContent =
+      result.ema9 === null
+        ? "--"
+        : formatPrice(
+            result.ema9
+          );
+
+
+    $("ema21")
+      .textContent =
+      result.ema21 === null
+        ? "--"
+        : formatPrice(
+            result.ema21
+          );
+
+
+    $("macd")
+      .textContent =
+      result.macd === null
+        ? "--"
+        : result.macd.toFixed(6);
+
+
+    $("stochastic")
+      .textContent =
+      result.stochastic === null
+        ? "--"
+        : result.stochastic.toFixed(2);
+
+
+    $("sma50")
+      .textContent =
+      result.sma50 === null
+        ? "--"
+        : formatPrice(
+            result.sma50
+          );
+
+
+    $("atr")
+      .textContent =
+      result.atr === null
+        ? "--"
+        : result.atr.toFixed(6);
+
+
+    $("bollinger")
+      .textContent =
+      result.bb
+        ? formatPrice(
+            result.bb.middle
+          )
+        : "--";
+
+
+    $("signalMessage")
+      .textContent =
+      `${result.signal} — ${result.confidence}% indicator agreement | Bullish: ${result.bullish}/7 | Bearish: ${result.bearish}/7`;
+
+  }
+
+
+  /* =========================================================
+     PAPER TRADE
+     ========================================================= */
+
+  function executePaperTrade(
+    result
+  ) {
+
+    const minimumConfidence =
+      Number(
+        $("confidence").value
+      ) || 70;
+
+
+    if (
+      result.signal === "WAIT"
+    )
+      return;
+
+
+    if (
+      result.confidence <
+      minimumConfidence
+    )
+      return;
+
+
+    const riskPercent =
+      Number(
+        $("risk").value
+      ) || 2;
+
+
+    const amount =
+      balance *
+      (riskPercent / 100);
+
+
+    if (amount <= 0)
+      return;
+
+
+    /*
+      Educational simulation only.
+      The result is randomly generated.
+    */
+
+    const won =
+      Math.random() >= 0.5;
+
+
+    const profit =
+      won
+        ? amount * CONFIG.payout
+        : -amount;
+
+
+    balance += profit;
+
+
+    if (won)
+      wins++;
+
+    else
+      losses++;
+
+
+    const trade = {
+
+      time:
+        new Date()
+          .toLocaleTimeString(),
+
+      pair:
+        $("pair").value,
+
+      timeframe:
+        $("timeframe").value,
+
+      signal:
+        result.signal,
+
+      confidence:
+        result.confidence,
+
+      amount,
+
+      result:
+        won
+          ? "WIN"
+          : "LOSS",
+
+      profit
+
+    };
+
+
+    trades.unshift(
+      trade
+    );
+
+
+    if (
+      trades.length > 100
+    )
+      trades.pop();
+
+
+    updateAccountUI();
+
+    renderTrades();
+
+    saveState();
+
+  }
+
+
+  /* =========================================================
+     ACCOUNT UI
+     ========================================================= */
+
+  function updateAccountUI() {
+
+    $("balance")
+      .textContent =
+      formatMoney(balance);
+
+
+    $("tradeCount")
+      .textContent =
+      trades.length;
+
+
+    $("wins")
+      .textContent =
+      wins;
+
+
+    $("losses")
+      .textContent =
+      losses;
+
+  }
+
+
+  /* =========================================================
+     JOURNAL
+     ========================================================= */
+
+  function renderTrades() {
+
+    const table =
+      $("tradeTable");
+
+
+    table.innerHTML = "";
+
+
+    trades.forEach(
+      trade => {
+
+        const row =
+          document.createElement(
+            "tr"
+          );
+
+
+        row.innerHTML = `
+
+          <td>
+            ${trade.time}
+          </td>
+
+          <td>
+            ${trade.pair}
+          </td>
+
+          <td>
+            ${trade.timeframe}m
+          </td>
+
+          <td>
+            ${trade.signal}
+          </td>
+
+          <td>
+            ${trade.confidence}%
+          </td>
+
+          <td>
+            ${formatMoney(
+              trade.amount
+            )}
+          </td>
+
+          <td>
+            ${trade.result}
+          </td>
+
+          <td>
+            ${
+              trade.profit >= 0
+                ? "+"
+                : ""
+            }${formatMoney(
+              trade.profit
+            )}
+          </td>
+
+        `;
+
+
+        table.appendChild(
+          row
+        );
+
+      }
+    );
+
+  }
+
+
+  /* =========================================================
+     BOT LOOP
+     ========================================================= */
+
+  function runCycle() {
+
+    if (!running)
+      return;
+
+
+    const pair =
+      $("pair").value;
+
+
+    candles =
+      generateCandles(
+        pair
+      );
+
+
+    const result =
+      analyze();
+
+
+    updateUI(
+      result
+    );
+
+
+    executePaperTrade(
+      result
+    );
+
+  }
+
+
+  /* =========================================================
+     START
+     ========================================================= */
+
+  function startBot() {
+
+    if (running)
+      return;
+
+
+    running = true;
+
+
+    $("statusText")
+      .textContent =
+      "RUNNING";
+
+
+    $("statusDot")
+      .style.background =
+      "#168c59";
+
+
+    runCycle();
+
+
+    timer =
+      setInterval(
+        runCycle,
+        CONFIG.updateInterval
+      );
+
+  }
+
+
+  /* =========================================================
+     STOP
+     ========================================================= */
+
+  function stopBot() {
+
+    running = false;
+
+
+    if (timer) {
+
+      clearInterval(
+        timer
+      );
+
+      timer = null;
+
+    }
+
+
+    $("statusText")
+      .textContent =
+      "STOPPED";
+
+
+    $("statusDot")
+      .style.background =
+      "#777";
+
+  }
+
+
+  /* =========================================================
+     STORAGE
+     ========================================================= */
+
+  function saveState() {
+
+    localStorage.setItem(
+
+      CONFIG.storageKey,
+
+      JSON.stringify({
+
+        balance,
+
+        trades,
+
+        wins,
+
+        losses
+
+      })
+
+    );
+
+  }
+
+
+  function loadState() {
+
+    try {
+
+      const saved =
+        JSON.parse(
+          localStorage.getItem(
+            CONFIG.storageKey
+          )
+        );
+
+
+      if (!saved)
+        return;
+
+
+      balance =
+        Number(
+          saved.balance
+        ) ||
+        CONFIG.startingBalance;
+
+
+      trades =
+        Array.isArray(
+          saved.trades
+        )
+          ? saved.trades
+          : [];
+
+
+      wins =
+        Number(
+          saved.wins
+        ) || 0;
+
+
+      losses =
+        Number(
+          saved.losses
+        ) || 0;
+
+
+      updateAccountUI();
+
+      renderTrades();
+
+
+    } catch (error) {
+
+      console.error(
+        "State loading error:",
+        error
+      );
+
+    }
+
+  }
+
+
+  /* =========================================================
+     CLEAR
+     ========================================================= */
+
+  function clearHistory() {
+
+    trades = [];
+
+    wins = 0;
+
+    losses = 0;
+
+    balance =
+      CONFIG.startingBalance;
+
+
+    localStorage.removeItem(
+      CONFIG.storageKey
+    );
+
+
+    updateAccountUI();
+
+    renderTrades();
+
+  }
+
+
+  /* =========================================================
+     EVENTS
+     ========================================================= */
+
+  $("startBtn")
+    .addEventListener(
+      "click",
+      startBot
+    );
+
+
+  $("stopBtn")
+    .addEventListener(
+      "click",
+      stopBot
+    );
+
+
+  $("clearBtn")
+    .addEventListener(
+      "click",
+      clearHistory
+    );
+
+
+  $("pair")
+    .addEventListener(
+      "change",
+      () => {
+
+        if (!running) {
+
+          const pair =
+            $("pair").value;
+
+          candles =
+            generateCandles(
+              pair
+            );
+
+          const result =
+            analyze();
+
+          updateUI(
+            result
+          );
+
+        }
+
+      }
+    );
+
+
+  /* =========================================================
+     INITIALIZATION
+     ========================================================= */
+
+  loadState();
+
+
+  candles =
+    generateCandles(
+      $("pair").value
+    );
+
+
+  const initialAnalysis =
+    analyze();
+
+
+  updateUI(
+    initialAnalysis
+  );
+
 
 })();
