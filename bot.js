@@ -1,1291 +1,585 @@
 (() => {
-
   "use strict";
 
-
   /* =========================================================
-     RK TRADE BOT
-     PAPER TRADING / EDUCATIONAL VERSION
+     RK SIGNAL PROVIDER
+     Bookmarklet-compatible
+     Analysis only — no real-money order execution
      ========================================================= */
-
 
   const CONFIG = {
-
-    startingBalance: 10000,
-
-    candleCount: 250,
-
-    updateInterval: 5000,
-
-    payout: 0.80,
-
-    storageKey: "RK_TRADE_BOT_STATE"
-
+    candlesRequired: 200,
+    rsiPeriod: 14,
+    emaFast: 9,
+    emaSlow: 21,
+    smaPeriod: 50,
+    bbPeriod: 20,
+    bbDeviation: 2,
+    stochasticPeriod: 14,
+    atrPeriod: 14,
+    minimumConfidence: 70,
+    refreshMs: 5000
   };
 
+  const PAIRS = [
+    "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF",
+    "AUD/USD", "USD/CAD", "NZD/USD",
+    "EUR/GBP", "EUR/JPY", "EUR/CHF",
+    "EUR/AUD", "EUR/CAD", "EUR/NZD",
+    "GBP/JPY", "GBP/CHF", "GBP/AUD",
+    "GBP/CAD", "GBP/NZD",
+    "AUD/JPY", "AUD/CHF", "AUD/CAD", "AUD/NZD",
+    "NZD/JPY", "NZD/CHF", "NZD/CAD",
+    "CAD/JPY", "CAD/CHF", "CHF/JPY"
+  ];
 
-  let running = false;
+  let selectedPair = "EUR/USD";
+  let interval = null;
 
-  let timer = null;
+  /* ---------- math ---------- */
 
-  let balance = CONFIG.startingBalance;
+  function sma(values, period) {
+    if (values.length < period) return null;
 
-  let trades = [];
+    const x = values.slice(-period);
 
-  let wins = 0;
-
-  let losses = 0;
-
-  let candles = [];
-
-
-  /* =========================================================
-     HELPERS
-     ========================================================= */
-
-  const $ = id =>
-    document.getElementById(id);
-
-
-  function random(min, max) {
-
-    return Math.random() * (max - min) + min;
-
+    return x.reduce((a, b) => a + b, 0) / period;
   }
 
+  function ema(values, period) {
+    if (values.length < period) return null;
 
-  function formatPrice(value) {
-
-    return Number(value).toFixed(5);
-
-  }
-
-
-  function formatMoney(value) {
-
-    return "$" + Number(value).toFixed(2);
-
-  }
-
-
-  /* =========================================================
-     SIMULATED MARKET
-     ========================================================= */
-
-  const basePrices = {
-
-    "EUR/USD": 1.10000,
-    "GBP/USD": 1.30000,
-    "USD/JPY": 148.000,
-    "USD/CHF": 0.85000,
-    "AUD/USD": 0.66000,
-    "USD/CAD": 1.36000,
-    "NZD/USD": 0.61000,
-
-    "EUR/GBP": 0.85000,
-    "EUR/JPY": 163.000,
-    "EUR/CHF": 0.94000,
-    "EUR/AUD": 1.66000,
-    "EUR/CAD": 1.50000,
-    "EUR/NZD": 1.80000,
-
-    "GBP/JPY": 193.000,
-    "GBP/CHF": 1.10000,
-    "GBP/AUD": 1.97000,
-    "GBP/CAD": 1.77000,
-    "GBP/NZD": 2.13000,
-
-    "AUD/JPY": 98.000,
-    "AUD/CHF": 0.56000,
-    "AUD/CAD": 0.90000,
-    "AUD/NZD": 1.08000,
-
-    "NZD/JPY": 90.000,
-    "NZD/CHF": 0.52000,
-    "NZD/CAD": 0.83000,
-
-    "CAD/JPY": 109.000,
-    "CAD/CHF": 0.62500,
-    "CHF/JPY": 175.000
-
-  };
-
-
-  function generateCandles(pair) {
-
-    let price =
-      basePrices[pair] || 1.10000;
-
-    const result = [];
-
-    for (let i = 0; i < CONFIG.candleCount; i++) {
-
-      const open = price;
-
-      const volatility =
-        price * random(0.0001, 0.001);
-
-      const movement =
-        random(-volatility, volatility);
-
-      const close =
-        open + movement;
-
-      const high =
-        Math.max(open, close) +
-        random(0, volatility * 0.5);
-
-      const low =
-        Math.min(open, close) -
-        random(0, volatility * 0.5);
-
-      result.push({
-
-        time:
-          Date.now() -
-          (CONFIG.candleCount - i) * 60000,
-
-        open,
-        high,
-        low,
-        close
-
-      });
-
-      price = close;
-
-    }
-
-    return result;
-
-  }
-
-
-  /* =========================================================
-     SMA
-     ========================================================= */
-
-  function SMA(values, period) {
-
-    if (values.length < period)
-      return null;
-
-    const slice =
-      values.slice(-period);
-
-    return (
-      slice.reduce(
-        (sum, value) => sum + value,
-        0
-      ) / period
-    );
-
-  }
-
-
-  /* =========================================================
-     EMA
-     ========================================================= */
-
-  function EMA(values, period) {
-
-    if (values.length < period)
-      return null;
-
-    const multiplier =
-      2 / (period + 1);
+    const multiplier = 2 / (period + 1);
 
     let result =
-      values
-        .slice(0, period)
-        .reduce(
-          (a, b) => a + b,
-          0
-        ) / period;
+      values.slice(0, period)
+        .reduce((a, b) => a + b, 0) / period;
 
-    for (
-      let i = period;
-      i < values.length;
-      i++
-    ) {
-
+    for (let i = period; i < values.length; i++) {
       result =
-        (
-          (values[i] - result) *
-          multiplier
-        ) + result;
-
+        ((values[i] - result) * multiplier) + result;
     }
 
     return result;
-
   }
 
-
-  /* =========================================================
-     RSI
-     ========================================================= */
-
-  function RSI(values, period = 14) {
-
-    if (values.length <= period)
-      return null;
+  function rsi(values, period = 14) {
+    if (values.length <= period) return null;
 
     let gains = 0;
+    let losses = 0;
 
-    let lossesValue = 0;
+    for (let i = values.length - period; i < values.length; i++) {
+      const change = values[i] - values[i - 1];
 
-    for (
-      let i = values.length - period;
-      i < values.length;
-      i++
-    ) {
-
-      const change =
-        values[i] - values[i - 1];
-
-      if (change > 0)
-        gains += change;
-
-      else
-        lossesValue += Math.abs(change);
-
+      if (change >= 0) gains += change;
+      else losses += Math.abs(change);
     }
 
-    if (lossesValue === 0)
-      return 100;
+    if (losses === 0) return 100;
 
-    const rs =
-      gains / lossesValue;
+    const rs = gains / losses;
 
-    return (
-      100 -
-      (100 / (1 + rs))
-    );
-
+    return 100 - (100 / (1 + rs));
   }
 
+  function bollinger(values, period = 20, deviation = 2) {
+    if (values.length < period) return null;
 
-  /* =========================================================
-     MACD
-     ========================================================= */
-
-  function MACD(values) {
-
-    const ema12 =
-      EMA(values, 12);
-
-    const ema26 =
-      EMA(values, 26);
-
-    if (
-      ema12 === null ||
-      ema26 === null
-    )
-      return null;
-
-    return ema12 - ema26;
-
-  }
-
-
-  /* =========================================================
-     BOLLINGER BANDS
-     ========================================================= */
-
-  function Bollinger(values, period = 20) {
-
-    if (values.length < period)
-      return null;
-
-    const slice =
-      values.slice(-period);
+    const x = values.slice(-period);
 
     const middle =
-      slice.reduce(
-        (a, b) => a + b,
-        0
-      ) / period;
+      x.reduce((a, b) => a + b, 0) / period;
 
     const variance =
-      slice.reduce(
-        (sum, value) =>
-          sum +
-          Math.pow(
-            value - middle,
-            2
-          ),
+      x.reduce(
+        (sum, value) => sum + Math.pow(value - middle, 2),
         0
       ) / period;
 
-    const deviation =
-      Math.sqrt(variance);
+    const sd = Math.sqrt(variance);
 
     return {
-
       middle,
-
-      upper:
-        middle +
-        deviation * 2,
-
-      lower:
-        middle -
-        deviation * 2
-
+      upper: middle + sd * deviation,
+      lower: middle - sd * deviation
     };
-
   }
 
+  function stochastic(candles, period = 14) {
+    if (candles.length < period) return null;
 
-  /* =========================================================
-     STOCHASTIC
-     ========================================================= */
+    const x = candles.slice(-period);
 
-  function Stochastic(
-    candleData,
-    period = 14
-  ) {
+    const highest = Math.max(...x.map(c => c.high));
+    const lowest = Math.min(...x.map(c => c.low));
+    const close = x[x.length - 1].close;
 
-    if (
-      candleData.length <
-      period
-    )
-      return null;
+    if (highest === lowest) return 50;
 
-    const slice =
-      candleData.slice(-period);
-
-    const highest =
-      Math.max(
-        ...slice.map(
-          c => c.high
-        )
-      );
-
-    const lowest =
-      Math.min(
-        ...slice.map(
-          c => c.low
-        )
-      );
-
-    const current =
-      slice[
-        slice.length - 1
-      ].close;
-
-    if (highest === lowest)
-      return 50;
-
-    return (
-      (
-        (current - lowest) /
-        (highest - lowest)
-      ) * 100
-    );
-
+    return ((close - lowest) / (highest - lowest)) * 100;
   }
 
-
-  /* =========================================================
-     ATR
-     ========================================================= */
-
-  function ATR(
-    candleData,
-    period = 14
-  ) {
-
-    if (
-      candleData.length <= period
-    )
-      return null;
+  function atr(candles, period = 14) {
+    if (candles.length <= period) return null;
 
     const ranges = [];
 
     for (
-      let i =
-        candleData.length - period;
-      i < candleData.length;
+      let i = candles.length - period;
+      i < candles.length;
       i++
     ) {
-
-      const current =
-        candleData[i];
-
-      const previous =
-        candleData[i - 1] ||
-        current;
-
-      const trueRange =
-        Math.max(
-
-          current.high -
-          current.low,
-
-          Math.abs(
-            current.high -
-            previous.close
-          ),
-
-          Math.abs(
-            current.low -
-            previous.close
-          )
-
-        );
+      const current = candles[i];
+      const previous = candles[i - 1] || current;
 
       ranges.push(
-        trueRange
+        Math.max(
+          current.high - current.low,
+          Math.abs(current.high - previous.close),
+          Math.abs(current.low - previous.close)
+        )
       );
-
     }
 
-    return (
-      ranges.reduce(
-        (a, b) => a + b,
-        0
-      ) / ranges.length
-    );
-
+    return ranges.reduce((a, b) => a + b, 0) / ranges.length;
   }
 
+  /* ---------- analysis ---------- */
 
-  /* =========================================================
-     ANALYSIS ENGINE
-     ========================================================= */
-
-  function analyze() {
-
-    const closes =
-      candles.map(
-        c => c.close
-      );
-
-    const current =
-      closes[closes.length - 1];
-
-
-    const rsi =
-      RSI(closes, 14);
-
-    const ema9 =
-      EMA(closes, 9);
-
-    const ema21 =
-      EMA(closes, 21);
-
-    const macd =
-      MACD(closes);
-
-    const bb =
-      Bollinger(closes, 20);
-
-    const stochastic =
-      Stochastic(
-        candles,
-        14
-      );
-
-    const sma50 =
-      SMA(closes, 50);
-
-    const atr =
-      ATR(candles, 14);
-
-
-    let bullish = 0;
-
-    let bearish = 0;
-
-
-    /* EMA */
-
-    if (
-      ema9 !== null &&
-      ema21 !== null
-    ) {
-
-      if (ema9 > ema21)
-        bullish++;
-
-      else
-        bearish++;
-
+  function analyze(candles) {
+    if (!Array.isArray(candles) ||
+        candles.length < CONFIG.candlesRequired) {
+      return {
+        signal: "WAIT",
+        confidence: 0,
+        reason: "Not enough candle data"
+      };
     }
 
+    const closes = candles.map(c => Number(c.close));
+
+    const price = closes.at(-1);
+
+    const rsiValue =
+      rsi(closes, CONFIG.rsiPeriod);
+
+    const ema9 =
+      ema(closes, CONFIG.emaFast);
+
+    const ema21 =
+      ema(closes, CONFIG.emaSlow);
+
+    const ema50 =
+      ema(closes, 50);
+
+    const sma50 =
+      sma(closes, CONFIG.smaPeriod);
+
+    const macdFast =
+      ema(closes, 12);
+
+    const macdSlow =
+      ema(closes, 26);
+
+    const macd =
+      macdFast !== null && macdSlow !== null
+        ? macdFast - macdSlow
+        : null;
+
+    const bb =
+      bollinger(
+        closes,
+        CONFIG.bbPeriod,
+        CONFIG.bbDeviation
+      );
+
+    const stoch =
+      stochastic(
+        candles,
+        CONFIG.stochasticPeriod
+      );
+
+    const atrValue =
+      atr(candles, CONFIG.atrPeriod);
+
+    let up = 0;
+    let down = 0;
+
+    const reasons = [];
+
+    /* EMA trend */
+
+    if (ema9 > ema21) {
+      up++;
+      reasons.push("EMA bullish");
+    } else {
+      down++;
+      reasons.push("EMA bearish");
+    }
 
     /* MACD */
 
     if (macd !== null) {
-
-      if (macd > 0)
-        bullish++;
-
-      else
-        bearish++;
-
+      if (macd > 0) {
+        up++;
+        reasons.push("MACD positive");
+      } else {
+        down++;
+        reasons.push("MACD negative");
+      }
     }
 
-
-    /* SMA */
+    /* SMA trend */
 
     if (sma50 !== null) {
-
-      if (current > sma50)
-        bullish++;
-
-      else
-        bearish++;
-
+      if (price > sma50) {
+        up++;
+        reasons.push("Price above SMA50");
+      } else {
+        down++;
+        reasons.push("Price below SMA50");
+      }
     }
-
 
     /* RSI */
 
-    if (rsi !== null) {
-
-      if (rsi < 30)
-        bullish++;
-
-      else if (rsi > 70)
-        bearish++;
-
+    if (rsiValue !== null) {
+      if (rsiValue < 30) {
+        up++;
+        reasons.push("RSI oversold");
+      } else if (rsiValue > 70) {
+        down++;
+        reasons.push("RSI overbought");
+      }
     }
 
+    /* Stochastic */
 
-    /* STOCHASTIC */
-
-    if (stochastic !== null) {
-
-      if (stochastic < 20)
-        bullish++;
-
-      else if (stochastic > 80)
-        bearish++;
-
+    if (stoch !== null) {
+      if (stoch < 20) {
+        up++;
+        reasons.push("Stochastic oversold");
+      } else if (stoch > 80) {
+        down++;
+        reasons.push("Stochastic overbought");
+      }
     }
 
-
-    /* BOLLINGER */
+    /* Bollinger */
 
     if (bb) {
-
-      if (current <= bb.lower)
-        bullish++;
-
-      else if (current >= bb.upper)
-        bearish++;
-
+      if (price <= bb.lower) {
+        up++;
+        reasons.push("Lower Bollinger area");
+      } else if (price >= bb.upper) {
+        down++;
+        reasons.push("Upper Bollinger area");
+      }
     }
 
-
-    /* MOMENTUM */
+    /* Short momentum */
 
     if (closes.length >= 4) {
+      const oldPrice = closes.at(-4);
 
-      const previous =
-        closes[
-          closes.length - 4
-        ];
-
-      if (current > previous)
-        bullish++;
-
-      else
-        bearish++;
-
+      if (price > oldPrice) {
+        up++;
+        reasons.push("Positive momentum");
+      } else {
+        down++;
+        reasons.push("Negative momentum");
+      }
     }
 
+    const total = 7;
 
-    const totalSignals = 7;
-
-    const strongest =
-      Math.max(
-        bullish,
-        bearish
-      );
+    const strongest = Math.max(up, down);
 
     const confidence =
-      Math.round(
-        (
-          strongest /
-          totalSignals
-        ) * 100
-      );
-
+      Math.round((strongest / total) * 100);
 
     let signal = "WAIT";
 
-
-    if (
-      bullish > bearish
-    )
-      signal = "UP";
-
-
-    if (
-      bearish > bullish
-    )
-      signal = "DOWN";
-
+    if (up > down) signal = "UP";
+    if (down > up) signal = "DOWN";
 
     return {
-
+      pair: selectedPair,
       signal,
-
       confidence,
-
-      bullish,
-
-      bearish,
-
-      current,
-
-      rsi,
-
+      price,
+      up,
+      down,
+      rsi: rsiValue,
       ema9,
-
       ema21,
-
-      macd,
-
-      bb,
-
-      stochastic,
-
+      ema50,
       sma50,
-
-      atr
-
+      macd,
+      bollinger: bb,
+      stochastic: stoch,
+      atr: atrValue,
+      reasons
     };
-
   }
 
+  /* ---------- data adapter ---------- */
 
-  /* =========================================================
-     UPDATE UI
-     ========================================================= */
+  async function getCandles() {
+    /*
+      Your permitted market-data adapter should provide:
+
+      window.RK_MARKET_DATA.getCandles(pair)
+
+      returning:
+
+      [
+        {
+          time: 1234567890,
+          open: 1.1000,
+          high: 1.1010,
+          low: 1.0990,
+          close: 1.1005
+        }
+      ]
+    */
+
+    if (
+      window.RK_MARKET_DATA &&
+      typeof window.RK_MARKET_DATA.getCandles === "function"
+    ) {
+      return await window.RK_MARKET_DATA.getCandles(
+        selectedPair
+      );
+    }
+
+    return [];
+  }
+
+  /* ---------- UI ---------- */
+
+  function createUI() {
+    if (document.getElementById("rk-signal-panel")) return;
+
+    const panel = document.createElement("div");
+
+    panel.id = "rk-signal-panel";
+
+    panel.style.cssText = `
+      position:fixed;
+      top:15px;
+      right:15px;
+      width:330px;
+      max-width:calc(100vw - 30px);
+      z-index:2147483647;
+      background:#101827;
+      color:white;
+      padding:16px;
+      border-radius:14px;
+      font-family:Arial,sans-serif;
+      box-shadow:0 10px 35px rgba(0,0,0,.45);
+    `;
+
+    panel.innerHTML = `
+      <div style="
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        margin-bottom:12px;
+      ">
+        <b style="font-size:18px;">RK Signal Bot</b>
+        <button id="rk-close"
+          style="
+            background:#303b50;
+            color:white;
+            border:0;
+            border-radius:6px;
+            padding:5px 9px;
+          ">
+          ×
+        </button>
+      </div>
+
+      <select id="rk-pair"
+        style="
+          width:100%;
+          padding:9px;
+          margin-bottom:12px;
+          background:#1c2638;
+          color:white;
+          border:1px solid #35425a;
+          border-radius:7px;
+        ">
+        ${PAIRS.map(
+          p => `<option>${p}</option>`
+        ).join("")}
+      </select>
+
+      <div id="rk-signal"
+        style="
+          text-align:center;
+          font-size:28px;
+          font-weight:bold;
+          padding:14px;
+          background:#182235;
+          border-radius:9px;
+        ">
+        WAIT
+      </div>
+
+      <div style="
+        margin-top:12px;
+        line-height:1.8;
+        font-size:13px;
+      ">
+        <div>Confidence: <b id="rk-confidence">0%</b></div>
+        <div>Price: <b id="rk-price">--</b></div>
+        <div>RSI: <b id="rk-rsi">--</b></div>
+        <div>EMA 9/21: <b id="rk-ema">--</b></div>
+        <div>MACD: <b id="rk-macd">--</b></div>
+        <div>Stochastic: <b id="rk-stoch">--</b></div>
+        <div>ATR: <b id="rk-atr">--</b></div>
+      </div>
+
+      <div id="rk-reasons"
+        style="
+          margin-top:10px;
+          color:#aeb9cc;
+          font-size:12px;
+          line-height:1.5;
+        ">
+        Waiting for market data...
+      </div>
+
+      <div style="
+        margin-top:12px;
+        font-size:11px;
+        color:#7f8ba0;
+        text-align:center;
+      ">
+        Analysis only — no order execution
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    document
+      .getElementById("rk-close")
+      .onclick = () => {
+        stop();
+        panel.remove();
+      };
+
+    document
+      .getElementById("rk-pair")
+      .onchange = e => {
+        selectedPair = e.target.value;
+        update();
+      };
+  }
 
   function updateUI(result) {
+    const signal =
+      document.getElementById("rk-signal");
 
-    const pair =
-      $("pair").value;
+    if (!signal) return;
 
-
-    $("selectedPair")
-      .textContent = pair;
-
-
-    $("price")
-      .textContent =
-      formatPrice(
-        result.current
-      );
-
-
-    $("lastUpdate")
-      .textContent =
-      new Date()
-        .toLocaleTimeString();
-
-
-    $("signal")
-      .textContent =
+    signal.textContent =
       result.signal;
 
+    document.getElementById(
+      "rk-confidence"
+    ).textContent =
+      `${result.confidence}%`;
 
-    $("confidenceValue")
-      .textContent =
-      result.confidence +
-      "%";
+    document.getElementById(
+      "rk-price"
+    ).textContent =
+      result.price
+        ? Number(result.price).toFixed(6)
+        : "--";
 
-
-    $("rsi")
-      .textContent =
-      result.rsi === null
+    document.getElementById(
+      "rk-rsi"
+    ).textContent =
+      result.rsi == null
         ? "--"
         : result.rsi.toFixed(2);
 
+    document.getElementById(
+      "rk-ema"
+    ).textContent =
+      result.ema9 && result.ema21
+        ? `${result.ema9.toFixed(6)} / ${result.ema21.toFixed(6)}`
+        : "--";
 
-    $("ema9")
-      .textContent =
-      result.ema9 === null
-        ? "--"
-        : formatPrice(
-            result.ema9
-          );
-
-
-    $("ema21")
-      .textContent =
-      result.ema21 === null
-        ? "--"
-        : formatPrice(
-            result.ema21
-          );
-
-
-    $("macd")
-      .textContent =
-      result.macd === null
+    document.getElementById(
+      "rk-macd"
+    ).textContent =
+      result.macd == null
         ? "--"
         : result.macd.toFixed(6);
 
-
-    $("stochastic")
-      .textContent =
-      result.stochastic === null
+    document.getElementById(
+      "rk-stoch"
+    ).textContent =
+      result.stochastic == null
         ? "--"
         : result.stochastic.toFixed(2);
 
-
-    $("sma50")
-      .textContent =
-      result.sma50 === null
-        ? "--"
-        : formatPrice(
-            result.sma50
-          );
-
-
-    $("atr")
-      .textContent =
-      result.atr === null
+    document.getElementById(
+      "rk-atr"
+    ).textContent =
+      result.atr == null
         ? "--"
         : result.atr.toFixed(6);
 
-
-    $("bollinger")
-      .textContent =
-      result.bb
-        ? formatPrice(
-            result.bb.middle
-          )
-        : "--";
-
-
-    $("signalMessage")
-      .textContent =
-      `${result.signal} — ${result.confidence}% indicator agreement | Bullish: ${result.bullish}/7 | Bearish: ${result.bearish}/7`;
-
+    document.getElementById(
+      "rk-reasons"
+    ).textContent =
+      result.reasons
+        ? result.reasons.join(" • ")
+        : result.reason || "";
   }
 
-
-  /* =========================================================
-     PAPER TRADE
-     ========================================================= */
-
-  function executePaperTrade(
-    result
-  ) {
-
-    const minimumConfidence =
-      Number(
-        $("confidence").value
-      ) || 70;
-
-
-    if (
-      result.signal === "WAIT"
-    )
-      return;
-
-
-    if (
-      result.confidence <
-      minimumConfidence
-    )
-      return;
-
-
-    const riskPercent =
-      Number(
-        $("risk").value
-      ) || 2;
-
-
-    const amount =
-      balance *
-      (riskPercent / 100);
-
-
-    if (amount <= 0)
-      return;
-
-
-    /*
-      Educational simulation only.
-      The result is randomly generated.
-    */
-
-    const won =
-      Math.random() >= 0.5;
-
-
-    const profit =
-      won
-        ? amount * CONFIG.payout
-        : -amount;
-
-
-    balance += profit;
-
-
-    if (won)
-      wins++;
-
-    else
-      losses++;
-
-
-    const trade = {
-
-      time:
-        new Date()
-          .toLocaleTimeString(),
-
-      pair:
-        $("pair").value,
-
-      timeframe:
-        $("timeframe").value,
-
-      signal:
-        result.signal,
-
-      confidence:
-        result.confidence,
-
-      amount,
-
-      result:
-        won
-          ? "WIN"
-          : "LOSS",
-
-      profit
-
-    };
-
-
-    trades.unshift(
-      trade
-    );
-
-
-    if (
-      trades.length > 100
-    )
-      trades.pop();
-
-
-    updateAccountUI();
-
-    renderTrades();
-
-    saveState();
-
-  }
-
-
-  /* =========================================================
-     ACCOUNT UI
-     ========================================================= */
-
-  function updateAccountUI() {
-
-    $("balance")
-      .textContent =
-      formatMoney(balance);
-
-
-    $("tradeCount")
-      .textContent =
-      trades.length;
-
-
-    $("wins")
-      .textContent =
-      wins;
-
-
-    $("losses")
-      .textContent =
-      losses;
-
-  }
-
-
-  /* =========================================================
-     JOURNAL
-     ========================================================= */
-
-  function renderTrades() {
-
-    const table =
-      $("tradeTable");
-
-
-    table.innerHTML = "";
-
-
-    trades.forEach(
-      trade => {
-
-        const row =
-          document.createElement(
-            "tr"
-          );
-
-
-        row.innerHTML = `
-
-          <td>
-            ${trade.time}
-          </td>
-
-          <td>
-            ${trade.pair}
-          </td>
-
-          <td>
-            ${trade.timeframe}m
-          </td>
-
-          <td>
-            ${trade.signal}
-          </td>
-
-          <td>
-            ${trade.confidence}%
-          </td>
-
-          <td>
-            ${formatMoney(
-              trade.amount
-            )}
-          </td>
-
-          <td>
-            ${trade.result}
-          </td>
-
-          <td>
-            ${
-              trade.profit >= 0
-                ? "+"
-                : ""
-            }${formatMoney(
-              trade.profit
-            )}
-          </td>
-
-        `;
-
-
-        table.appendChild(
-          row
-        );
-
-      }
-    );
-
-  }
-
-
-  /* =========================================================
-     BOT LOOP
-     ========================================================= */
-
-  function runCycle() {
-
-    if (!running)
-      return;
-
-
-    const pair =
-      $("pair").value;
-
-
-    candles =
-      generateCandles(
-        pair
-      );
-
-
-    const result =
-      analyze();
-
-
-    updateUI(
-      result
-    );
-
-
-    executePaperTrade(
-      result
-    );
-
-  }
-
-
-  /* =========================================================
-     START
-     ========================================================= */
-
-  function startBot() {
-
-    if (running)
-      return;
-
-
-    running = true;
-
-
-    $("statusText")
-      .textContent =
-      "RUNNING";
-
-
-    $("statusDot")
-      .style.background =
-      "#168c59";
-
-
-    runCycle();
-
-
-    timer =
-      setInterval(
-        runCycle,
-        CONFIG.updateInterval
-      );
-
-  }
-
-
-  /* =========================================================
-     STOP
-     ========================================================= */
-
-  function stopBot() {
-
-    running = false;
-
-
-    if (timer) {
-
-      clearInterval(
-        timer
-      );
-
-      timer = null;
-
-    }
-
-
-    $("statusText")
-      .textContent =
-      "STOPPED";
-
-
-    $("statusDot")
-      .style.background =
-      "#777";
-
-  }
-
-
-  /* =========================================================
-     STORAGE
-     ========================================================= */
-
-  function saveState() {
-
-    localStorage.setItem(
-
-      CONFIG.storageKey,
-
-      JSON.stringify({
-
-        balance,
-
-        trades,
-
-        wins,
-
-        losses
-
-      })
-
-    );
-
-  }
-
-
-  function loadState() {
-
+  async function update() {
     try {
+      const candles = await getCandles();
 
-      const saved =
-        JSON.parse(
-          localStorage.getItem(
-            CONFIG.storageKey
-          )
-        );
+      const result =
+        analyze(candles);
 
-
-      if (!saved)
-        return;
-
-
-      balance =
-        Number(
-          saved.balance
-        ) ||
-        CONFIG.startingBalance;
-
-
-      trades =
-        Array.isArray(
-          saved.trades
-        )
-          ? saved.trades
-          : [];
-
-
-      wins =
-        Number(
-          saved.wins
-        ) || 0;
-
-
-      losses =
-        Number(
-          saved.losses
-        ) || 0;
-
-
-      updateAccountUI();
-
-      renderTrades();
-
+      updateUI(result);
 
     } catch (error) {
-
-      console.error(
-        "State loading error:",
-        error
-      );
-
+      updateUI({
+        signal: "ERROR",
+        confidence: 0,
+        reason: error.message
+      });
     }
-
   }
 
+  function start() {
+    createUI();
 
-  /* =========================================================
-     CLEAR
-     ========================================================= */
+    update();
 
-  function clearHistory() {
-
-    trades = [];
-
-    wins = 0;
-
-    losses = 0;
-
-    balance =
-      CONFIG.startingBalance;
-
-
-    localStorage.removeItem(
-      CONFIG.storageKey
-    );
-
-
-    updateAccountUI();
-
-    renderTrades();
-
+    interval =
+      setInterval(
+        update,
+        CONFIG.refreshMs
+      );
   }
 
+  function stop() {
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
+    }
+  }
 
-  /* =========================================================
-     EVENTS
-     ========================================================= */
-
-  $("startBtn")
-    .addEventListener(
-      "click",
-      startBot
-    );
-
-
-  $("stopBtn")
-    .addEventListener(
-      "click",
-      stopBot
-    );
-
-
-  $("clearBtn")
-    .addEventListener(
-      "click",
-      clearHistory
-    );
-
-
-  $("pair")
-    .addEventListener(
-      "change",
-      () => {
-
-        if (!running) {
-
-          const pair =
-            $("pair").value;
-
-          candles =
-            generateCandles(
-              pair
-            );
-
-          const result =
-            analyze();
-
-          updateUI(
-            result
-          );
-
-        }
-
-      }
-    );
-
-
-  /* =========================================================
-     INITIALIZATION
-     ========================================================= */
-
-  loadState();
-
-
-  candles =
-    generateCandles(
-      $("pair").value
-    );
-
-
-  const initialAnalysis =
-    analyze();
-
-
-  updateUI(
-    initialAnalysis
-  );
-
+  start();
 
 })();
