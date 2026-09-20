@@ -1,66 +1,124 @@
 (() => {
   "use strict";
 
-  /* =========================================================
-     RK SIGNAL PROVIDER
-     Bookmarklet-compatible
-     Analysis only — no real-money order execution
-     ========================================================= */
-
-  const CONFIG = {
-    candlesRequired: 200,
-    rsiPeriod: 14,
-    emaFast: 9,
-    emaSlow: 21,
-    smaPeriod: 50,
-    bbPeriod: 20,
-    bbDeviation: 2,
-    stochasticPeriod: 14,
-    atrPeriod: 14,
-    minimumConfidence: 70,
-    refreshMs: 5000
-  };
+  // RK Signal Provider — Bookmarklet Edition
+  // Educational / paper-analysis only
+  // No real-money order execution
 
   const PAIRS = [
-    "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF",
-    "AUD/USD", "USD/CAD", "NZD/USD",
-    "EUR/GBP", "EUR/JPY", "EUR/CHF",
-    "EUR/AUD", "EUR/CAD", "EUR/NZD",
-    "GBP/JPY", "GBP/CHF", "GBP/AUD",
-    "GBP/CAD", "GBP/NZD",
-    "AUD/JPY", "AUD/CHF", "AUD/CAD", "AUD/NZD",
-    "NZD/JPY", "NZD/CHF", "NZD/CAD",
-    "CAD/JPY", "CAD/CHF", "CHF/JPY"
+    "EUR/USD","GBP/USD","USD/JPY","USD/CHF",
+    "AUD/USD","USD/CAD","NZD/USD",
+    "EUR/GBP","EUR/JPY","EUR/CHF","EUR/AUD","EUR/CAD","EUR/NZD",
+    "GBP/JPY","GBP/CHF","GBP/AUD","GBP/CAD","GBP/NZD",
+    "AUD/JPY","AUD/CAD","AUD/CHF","AUD/NZD",
+    "CAD/JPY","CAD/CHF","CHF/JPY",
+    "NZD/JPY","NZD/CAD","NZD/CHF"
   ];
 
-  let selectedPair = "EUR/USD";
-  let interval = null;
+  const ID = "rk-signal-bookmarklet";
 
-  /* ---------- math ---------- */
+  document.getElementById(ID)?.remove();
+
+  const panel = document.createElement("div");
+  panel.id = ID;
+
+  Object.assign(panel.style, {
+    position: "fixed",
+    top: "15px",
+    right: "15px",
+    width: "330px",
+    maxWidth: "calc(100vw - 30px)",
+    background: "#111827",
+    color: "#fff",
+    zIndex: "2147483647",
+    border: "1px solid #374151",
+    borderRadius: "14px",
+    padding: "14px",
+    fontFamily: "Arial,sans-serif",
+    boxShadow: "0 10px 35px rgba(0,0,0,.45)"
+  });
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b style="font-size:17px">RK Signal Provider</b>
+      <button id="rkClose"
+        style="background:#374151;color:white;border:0;border-radius:7px;padding:5px 9px">
+        ×
+      </button>
+    </div>
+
+    <div style="margin-top:12px">
+      <select id="rkPair"
+        style="width:100%;padding:9px;border-radius:8px;background:#1f2937;color:white;border:1px solid #4b5563">
+        ${PAIRS.map(p => `<option>${p}</option>`).join("")}
+      </select>
+    </div>
+
+    <div style="margin-top:9px">
+      <select id="rkTF"
+        style="width:100%;padding:9px;border-radius:8px;background:#1f2937;color:white;border:1px solid #4b5563">
+        <option value="1m">1 Minute</option>
+        <option value="5m">5 Minutes</option>
+        <option value="15m">15 Minutes</option>
+        <option value="1h">1 Hour</option>
+      </select>
+    </div>
+
+    <button id="rkAnalyze"
+      style="width:100%;margin-top:10px;padding:10px;border:0;border-radius:8px;background:#2563eb;color:white;font-weight:bold">
+      Analyze
+    </button>
+
+    <div id="rkResult"
+      style="margin-top:12px;background:#1f2937;border-radius:10px;padding:12px">
+      Ready
+    </div>
+
+    <div id="rkIndicators"
+      style="margin-top:10px;font-size:12px;line-height:1.7">
+    </div>
+
+    <div style="margin-top:10px;font-size:11px;color:#9ca3af">
+      Educational signal analysis only
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  const $ = id => panel.querySelector(id);
+
+  $("#rkClose").onclick = () => panel.remove();
+
+  // --------------------------------------------------
+  // Indicator functions
+  // --------------------------------------------------
 
   function sma(values, period) {
     if (values.length < period) return null;
 
-    const x = values.slice(-period);
+    let sum = 0;
 
-    return x.reduce((a, b) => a + b, 0) / period;
+    for (let i = values.length - period; i < values.length; i++) {
+      sum += values[i];
+    }
+
+    return sum / period;
   }
 
   function ema(values, period) {
     if (values.length < period) return null;
 
-    const multiplier = 2 / (period + 1);
+    const k = 2 / (period + 1);
 
-    let result =
-      values.slice(0, period)
-        .reduce((a, b) => a + b, 0) / period;
+    let e = values
+      .slice(0, period)
+      .reduce((a, b) => a + b, 0) / period;
 
     for (let i = period; i < values.length; i++) {
-      result =
-        ((values[i] - result) * multiplier) + result;
+      e = values[i] * k + e * (1 - k);
     }
 
-    return result;
+    return e;
   }
 
   function rsi(values, period = 14) {
@@ -70,86 +128,89 @@
     let losses = 0;
 
     for (let i = values.length - period; i < values.length; i++) {
-      const change = values[i] - values[i - 1];
+      const d = values[i] - values[i - 1];
 
-      if (change >= 0) gains += change;
-      else losses += Math.abs(change);
+      if (d >= 0) gains += d;
+      else losses -= d;
     }
 
     if (losses === 0) return 100;
 
     const rs = gains / losses;
 
-    return 100 - (100 / (1 + rs));
+    return 100 - 100 / (1 + rs);
   }
 
-  function bollinger(values, period = 20, deviation = 2) {
+  function macd(values) {
+    const e12 = ema(values, 12);
+    const e26 = ema(values, 26);
+
+    if (e12 == null || e26 == null) return null;
+
+    return e12 - e26;
+  }
+
+  function bollinger(values, period = 20) {
     if (values.length < period) return null;
 
-    const x = values.slice(-period);
-
-    const middle =
-      x.reduce((a, b) => a + b, 0) / period;
+    const recent = values.slice(-period);
+    const mean = recent.reduce((a, b) => a + b, 0) / period;
 
     const variance =
-      x.reduce(
-        (sum, value) => sum + Math.pow(value - middle, 2),
-        0
-      ) / period;
+      recent.reduce((s, x) => s + Math.pow(x - mean, 2), 0) /
+      period;
 
     const sd = Math.sqrt(variance);
 
     return {
-      middle,
-      upper: middle + sd * deviation,
-      lower: middle - sd * deviation
+      middle: mean,
+      upper: mean + 2 * sd,
+      lower: mean - 2 * sd
     };
   }
 
   function stochastic(candles, period = 14) {
     if (candles.length < period) return null;
 
-    const x = candles.slice(-period);
+    const recent = candles.slice(-period);
 
-    const highest = Math.max(...x.map(c => c.high));
-    const lowest = Math.min(...x.map(c => c.low));
-    const close = x[x.length - 1].close;
+    const high = Math.max(...recent.map(x => x.high));
+    const low = Math.min(...recent.map(x => x.low));
+    const close = recent[recent.length - 1].close;
 
-    if (highest === lowest) return 50;
+    if (high === low) return 50;
 
-    return ((close - lowest) / (highest - lowest)) * 100;
+    return ((close - low) / (high - low)) * 100;
   }
 
   function atr(candles, period = 14) {
     if (candles.length <= period) return null;
 
-    const ranges = [];
+    const trs = [];
 
-    for (
-      let i = candles.length - period;
-      i < candles.length;
-      i++
-    ) {
-      const current = candles[i];
-      const previous = candles[i - 1] || current;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i];
+      const p = candles[i - 1];
 
-      ranges.push(
-        Math.max(
-          current.high - current.low,
-          Math.abs(current.high - previous.close),
-          Math.abs(current.low - previous.close)
-        )
+      const tr = Math.max(
+        c.high - c.low,
+        Math.abs(c.high - p.close),
+        Math.abs(c.low - p.close)
       );
+
+      trs.push(tr);
     }
 
-    return ranges.reduce((a, b) => a + b, 0) / ranges.length;
+    return sma(trs, period);
   }
 
-  /* ---------- analysis ---------- */
+  // --------------------------------------------------
+  // Signal engine
+  // --------------------------------------------------
 
   function analyze(candles) {
-    if (!Array.isArray(candles) ||
-        candles.length < CONFIG.candlesRequired) {
+
+    if (!Array.isArray(candles) || candles.length < 60) {
       return {
         signal: "WAIT",
         confidence: 0,
@@ -158,189 +219,114 @@
     }
 
     const closes = candles.map(c => Number(c.close));
-
     const price = closes.at(-1);
 
-    const rsiValue =
-      rsi(closes, CONFIG.rsiPeriod);
-
-    const ema9 =
-      ema(closes, CONFIG.emaFast);
-
-    const ema21 =
-      ema(closes, CONFIG.emaSlow);
-
-    const ema50 =
-      ema(closes, 50);
-
-    const sma50 =
-      sma(closes, CONFIG.smaPeriod);
-
-    const macdFast =
-      ema(closes, 12);
-
-    const macdSlow =
-      ema(closes, 26);
-
-    const macd =
-      macdFast !== null && macdSlow !== null
-        ? macdFast - macdSlow
-        : null;
-
-    const bb =
-      bollinger(
-        closes,
-        CONFIG.bbPeriod,
-        CONFIG.bbDeviation
-      );
-
-    const stoch =
-      stochastic(
-        candles,
-        CONFIG.stochasticPeriod
-      );
-
-    const atrValue =
-      atr(candles, CONFIG.atrPeriod);
+    const r = rsi(closes, 14);
+    const e9 = ema(closes, 9);
+    const e21 = ema(closes, 21);
+    const e50 = ema(closes, 50);
+    const s50 = sma(closes, 50);
+    const m = macd(closes);
+    const bb = bollinger(closes, 20);
+    const st = stochastic(candles, 14);
+    const a = atr(candles, 14);
 
     let up = 0;
     let down = 0;
 
-    const reasons = [];
-
-    /* EMA trend */
-
-    if (ema9 > ema21) {
-      up++;
-      reasons.push("EMA bullish");
-    } else {
-      down++;
-      reasons.push("EMA bearish");
+    // RSI
+    if (r != null) {
+      if (r > 55 && r < 70) up++;
+      if (r < 45 && r > 30) down++;
     }
 
-    /* MACD */
-
-    if (macd !== null) {
-      if (macd > 0) {
-        up++;
-        reasons.push("MACD positive");
-      } else {
-        down++;
-        reasons.push("MACD negative");
-      }
+    // EMA 9 / 21
+    if (e9 != null && e21 != null) {
+      if (e9 > e21) up++;
+      if (e9 < e21) down++;
     }
 
-    /* SMA trend */
-
-    if (sma50 !== null) {
-      if (price > sma50) {
-        up++;
-        reasons.push("Price above SMA50");
-      } else {
-        down++;
-        reasons.push("Price below SMA50");
-      }
+    // EMA 50
+    if (e50 != null) {
+      if (price > e50) up++;
+      if (price < e50) down++;
     }
 
-    /* RSI */
-
-    if (rsiValue !== null) {
-      if (rsiValue < 30) {
-        up++;
-        reasons.push("RSI oversold");
-      } else if (rsiValue > 70) {
-        down++;
-        reasons.push("RSI overbought");
-      }
+    // SMA 50
+    if (s50 != null) {
+      if (price > s50) up++;
+      if (price < s50) down++;
     }
 
-    /* Stochastic */
-
-    if (stoch !== null) {
-      if (stoch < 20) {
-        up++;
-        reasons.push("Stochastic oversold");
-      } else if (stoch > 80) {
-        down++;
-        reasons.push("Stochastic overbought");
-      }
+    // MACD
+    if (m != null) {
+      if (m > 0) up++;
+      if (m < 0) down++;
     }
 
-    /* Bollinger */
-
+    // Bollinger
     if (bb) {
-      if (price <= bb.lower) {
-        up++;
-        reasons.push("Lower Bollinger area");
-      } else if (price >= bb.upper) {
-        down++;
-        reasons.push("Upper Bollinger area");
-      }
+      if (price > bb.middle) up++;
+      if (price < bb.middle) down++;
     }
 
-    /* Short momentum */
-
-    if (closes.length >= 4) {
-      const oldPrice = closes.at(-4);
-
-      if (price > oldPrice) {
-        up++;
-        reasons.push("Positive momentum");
-      } else {
-        down++;
-        reasons.push("Negative momentum");
-      }
+    // Stochastic
+    if (st != null) {
+      if (st > 50 && st < 80) up++;
+      if (st < 50 && st > 20) down++;
     }
 
     const total = 7;
 
-    const strongest = Math.max(up, down);
-
     const confidence =
-      Math.round((strongest / total) * 100);
+      Math.round((Math.max(up, down) / total) * 100);
 
     let signal = "WAIT";
 
-    if (up > down) signal = "UP";
-    if (down > up) signal = "DOWN";
+    if (up >= 5 && up > down) {
+      signal = "UP";
+    } else if (down >= 5 && down > up) {
+      signal = "DOWN";
+    }
 
     return {
-      pair: selectedPair,
       signal,
       confidence,
       price,
       up,
       down,
-      rsi: rsiValue,
-      ema9,
-      ema21,
-      ema50,
-      sma50,
-      macd,
+      rsi: r,
+      ema9: e9,
+      ema21: e21,
+      ema50: e50,
+      sma50: s50,
+      macd: m,
       bollinger: bb,
-      stochastic: stoch,
-      atr: atrValue,
-      reasons
+      stochastic: st,
+      atr: a
     };
   }
 
-  /* ---------- data adapter ---------- */
+  // --------------------------------------------------
+  // Market-data adapter
+  // --------------------------------------------------
 
-  async function getCandles() {
+  async function getCandles(pair) {
+
     /*
-      Your permitted market-data adapter should provide:
+      Your permitted market-data source should expose:
 
       window.RK_MARKET_DATA.getCandles(pair)
 
-      returning:
+      Expected format:
 
       [
         {
-          time: 1234567890,
-          open: 1.1000,
-          high: 1.1010,
-          low: 1.0990,
-          close: 1.1005
+          open: ...,
+          high: ...,
+          low: ...,
+          close: ...,
+          time: ...
         }
       ]
     */
@@ -349,237 +335,72 @@
       window.RK_MARKET_DATA &&
       typeof window.RK_MARKET_DATA.getCandles === "function"
     ) {
-      return await window.RK_MARKET_DATA.getCandles(
-        selectedPair
-      );
+      return await window.RK_MARKET_DATA.getCandles(pair);
     }
 
-    return [];
+    throw new Error(
+      "No permitted market-data adapter found."
+    );
   }
 
-  /* ---------- UI ---------- */
+  // --------------------------------------------------
+  // Analyze button
+  // --------------------------------------------------
 
-  function createUI() {
-    if (document.getElementById("rk-signal-panel")) return;
+  $("#rkAnalyze").onclick = async () => {
 
-    const panel = document.createElement("div");
+    const pair = $("#rkPair").value;
+    const tf = $("#rkTF").value;
 
-    panel.id = "rk-signal-panel";
+    $("#rkResult").innerHTML = "Analyzing...";
 
-    panel.style.cssText = `
-      position:fixed;
-      top:15px;
-      right:15px;
-      width:330px;
-      max-width:calc(100vw - 30px);
-      z-index:2147483647;
-      background:#101827;
-      color:white;
-      padding:16px;
-      border-radius:14px;
-      font-family:Arial,sans-serif;
-      box-shadow:0 10px 35px rgba(0,0,0,.45);
-    `;
-
-    panel.innerHTML = `
-      <div style="
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        margin-bottom:12px;
-      ">
-        <b style="font-size:18px;">RK Signal Bot</b>
-        <button id="rk-close"
-          style="
-            background:#303b50;
-            color:white;
-            border:0;
-            border-radius:6px;
-            padding:5px 9px;
-          ">
-          ×
-        </button>
-      </div>
-
-      <select id="rk-pair"
-        style="
-          width:100%;
-          padding:9px;
-          margin-bottom:12px;
-          background:#1c2638;
-          color:white;
-          border:1px solid #35425a;
-          border-radius:7px;
-        ">
-        ${PAIRS.map(
-          p => `<option>${p}</option>`
-        ).join("")}
-      </select>
-
-      <div id="rk-signal"
-        style="
-          text-align:center;
-          font-size:28px;
-          font-weight:bold;
-          padding:14px;
-          background:#182235;
-          border-radius:9px;
-        ">
-        WAIT
-      </div>
-
-      <div style="
-        margin-top:12px;
-        line-height:1.8;
-        font-size:13px;
-      ">
-        <div>Confidence: <b id="rk-confidence">0%</b></div>
-        <div>Price: <b id="rk-price">--</b></div>
-        <div>RSI: <b id="rk-rsi">--</b></div>
-        <div>EMA 9/21: <b id="rk-ema">--</b></div>
-        <div>MACD: <b id="rk-macd">--</b></div>
-        <div>Stochastic: <b id="rk-stoch">--</b></div>
-        <div>ATR: <b id="rk-atr">--</b></div>
-      </div>
-
-      <div id="rk-reasons"
-        style="
-          margin-top:10px;
-          color:#aeb9cc;
-          font-size:12px;
-          line-height:1.5;
-        ">
-        Waiting for market data...
-      </div>
-
-      <div style="
-        margin-top:12px;
-        font-size:11px;
-        color:#7f8ba0;
-        text-align:center;
-      ">
-        Analysis only — no order execution
-      </div>
-    `;
-
-    document.body.appendChild(panel);
-
-    document
-      .getElementById("rk-close")
-      .onclick = () => {
-        stop();
-        panel.remove();
-      };
-
-    document
-      .getElementById("rk-pair")
-      .onchange = e => {
-        selectedPair = e.target.value;
-        update();
-      };
-  }
-
-  function updateUI(result) {
-    const signal =
-      document.getElementById("rk-signal");
-
-    if (!signal) return;
-
-    signal.textContent =
-      result.signal;
-
-    document.getElementById(
-      "rk-confidence"
-    ).textContent =
-      `${result.confidence}%`;
-
-    document.getElementById(
-      "rk-price"
-    ).textContent =
-      result.price
-        ? Number(result.price).toFixed(6)
-        : "--";
-
-    document.getElementById(
-      "rk-rsi"
-    ).textContent =
-      result.rsi == null
-        ? "--"
-        : result.rsi.toFixed(2);
-
-    document.getElementById(
-      "rk-ema"
-    ).textContent =
-      result.ema9 && result.ema21
-        ? `${result.ema9.toFixed(6)} / ${result.ema21.toFixed(6)}`
-        : "--";
-
-    document.getElementById(
-      "rk-macd"
-    ).textContent =
-      result.macd == null
-        ? "--"
-        : result.macd.toFixed(6);
-
-    document.getElementById(
-      "rk-stoch"
-    ).textContent =
-      result.stochastic == null
-        ? "--"
-        : result.stochastic.toFixed(2);
-
-    document.getElementById(
-      "rk-atr"
-    ).textContent =
-      result.atr == null
-        ? "--"
-        : result.atr.toFixed(6);
-
-    document.getElementById(
-      "rk-reasons"
-    ).textContent =
-      result.reasons
-        ? result.reasons.join(" • ")
-        : result.reason || "";
-  }
-
-  async function update() {
     try {
-      const candles = await getCandles();
 
-      const result =
-        analyze(candles);
+      const candles = await getCandles(pair, tf);
 
-      updateUI(result);
+      const result = analyze(candles);
 
-    } catch (error) {
-      updateUI({
-        signal: "ERROR",
-        confidence: 0,
-        reason: error.message
-      });
+      $("#rkResult").innerHTML = `
+        <div style="font-size:22px;font-weight:bold">
+          ${result.signal}
+        </div>
+
+        <div style="margin-top:5px">
+          Confidence: <b>${result.confidence}%</b>
+        </div>
+
+        <div style="margin-top:5px;font-size:12px">
+          UP votes: ${result.up}/7 |
+          DOWN votes: ${result.down}/7
+        </div>
+
+        <div style="margin-top:5px;font-size:12px">
+          Price: ${Number(result.price).toFixed(6)}
+        </div>
+      `;
+
+      $("#rkIndicators").innerHTML = `
+        <b>Indicators</b><br>
+        RSI(14): ${result.rsi?.toFixed(2) ?? "-"}<br>
+        EMA9: ${result.ema9?.toFixed(6) ?? "-"}<br>
+        EMA21: ${result.ema21?.toFixed(6) ?? "-"}<br>
+        EMA50: ${result.ema50?.toFixed(6) ?? "-"}<br>
+        SMA50: ${result.sma50?.toFixed(6) ?? "-"}<br>
+        MACD: ${result.macd?.toFixed(6) ?? "-"}<br>
+        Stochastic: ${result.stochastic?.toFixed(2) ?? "-"}<br>
+        ATR: ${result.atr?.toFixed(6) ?? "-"}
+      `;
+
+    } catch (err) {
+
+      $("#rkResult").innerHTML = `
+        <div style="color:#fca5a5">
+          ${err.message}
+        </div>
+      `;
+
+      $("#rkIndicators").innerHTML = "";
     }
-  }
-
-  function start() {
-    createUI();
-
-    update();
-
-    interval =
-      setInterval(
-        update,
-        CONFIG.refreshMs
-      );
-  }
-
-  function stop() {
-    if (interval) {
-      clearInterval(interval);
-      interval = null;
-    }
-  }
-
-  start();
+  };
 
 })();
