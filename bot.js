@@ -1,406 +1,304 @@
 (() => {
-  "use strict";
+"use strict";
 
-  // RK Signal Provider — Bookmarklet Edition
-  // Educational / paper-analysis only
-  // No real-money order execution
+const ID="RK_MARKET_ANALYZER";
+document.getElementById(ID)?.remove();
 
-  const PAIRS = [
-    "EUR/USD","GBP/USD","USD/JPY","USD/CHF",
-    "AUD/USD","USD/CAD","NZD/USD",
-    "EUR/GBP","EUR/JPY","EUR/CHF","EUR/AUD","EUR/CAD","EUR/NZD",
-    "GBP/JPY","GBP/CHF","GBP/AUD","GBP/CAD","GBP/NZD",
-    "AUD/JPY","AUD/CAD","AUD/CHF","AUD/NZD",
-    "CAD/JPY","CAD/CHF","CHF/JPY",
-    "NZD/JPY","NZD/CAD","NZD/CHF"
-  ];
+const pairs=[
+"EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","USD/CAD","NZD/USD",
+"EUR/GBP","EUR/JPY","EUR/CHF","EUR/AUD","EUR/CAD","EUR/NZD",
+"GBP/JPY","GBP/CHF","GBP/AUD","GBP/CAD","GBP/NZD",
+"AUD/JPY","AUD/CAD","AUD/CHF","AUD/NZD",
+"CAD/JPY","CAD/CHF","CHF/JPY","NZD/JPY","NZD/CAD","NZD/CHF"
+];
 
-  const ID = "rk-signal-bookmarklet";
+const box=document.createElement("div");
+box.id=ID;
 
-  document.getElementById(ID)?.remove();
+Object.assign(box.style,{
+position:"fixed",
+top:"15px",
+right:"15px",
+width:"350px",
+maxWidth:"calc(100vw - 30px)",
+maxHeight:"90vh",
+overflow:"auto",
+zIndex:2147483647,
+background:"#111827",
+color:"#fff",
+padding:"14px",
+borderRadius:"14px",
+fontFamily:"Arial,sans-serif",
+boxShadow:"0 10px 35px rgba(0,0,0,.5)"
+});
 
-  const panel = document.createElement("div");
-  panel.id = ID;
+box.innerHTML=`
+<div style="display:flex;justify-content:space-between;align-items:center">
+<b style="font-size:18px">RK Market Analyzer</b>
+<button id="rkX" style="background:#374151;color:#fff;border:0;border-radius:7px;padding:5px 10px">×</button>
+</div>
 
-  Object.assign(panel.style, {
-    position: "fixed",
-    top: "15px",
-    right: "15px",
-    width: "330px",
-    maxWidth: "calc(100vw - 30px)",
-    background: "#111827",
-    color: "#fff",
-    zIndex: "2147483647",
-    border: "1px solid #374151",
-    borderRadius: "14px",
-    padding: "14px",
-    fontFamily: "Arial,sans-serif",
-    boxShadow: "0 10px 35px rgba(0,0,0,.45)"
-  });
+<select id="rkPair"
+style="width:100%;margin-top:12px;padding:10px;border-radius:8px;background:#1f2937;color:#fff">
+${pairs.map(x=>`<option>${x}</option>`).join("")}
+</select>
 
-  panel.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <b style="font-size:17px">RK Signal Provider</b>
-      <button id="rkClose"
-        style="background:#374151;color:white;border:0;border-radius:7px;padding:5px 9px">
-        ×
-      </button>
-    </div>
+<div style="margin-top:8px;padding:9px;background:#1f2937;border-radius:8px">
+Timeframe: <b>1 Minute</b>
+</div>
 
-    <div style="margin-top:12px">
-      <select id="rkPair"
-        style="width:100%;padding:9px;border-radius:8px;background:#1f2937;color:white;border:1px solid #4b5563">
-        ${PAIRS.map(p => `<option>${p}</option>`).join("")}
-      </select>
-    </div>
+<button id="rkGo"
+style="width:100%;margin-top:10px;padding:11px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:bold">
+ANALYZE
+</button>
 
-    <div style="margin-top:9px">
-      <select id="rkTF"
-        style="width:100%;padding:9px;border-radius:8px;background:#1f2937;color:white;border:1px solid #4b5563">
-        <option value="1m">1 Minute</option>
-        <option value="5m">5 Minutes</option>
-        <option value="15m">15 Minutes</option>
-        <option value="1h">1 Hour</option>
-      </select>
-    </div>
+<div id="rkOut" style="margin-top:12px"></div>
 
-    <button id="rkAnalyze"
-      style="width:100%;margin-top:10px;padding:10px;border:0;border-radius:8px;background:#2563eb;color:white;font-weight:bold">
-      Analyze
-    </button>
+<div style="font-size:10px;color:#9ca3af;margin-top:10px">
+Educational market analysis • Not a trade instruction
+</div>
+`;
 
-    <div id="rkResult"
-      style="margin-top:12px;background:#1f2937;border-radius:10px;padding:12px">
-      Ready
-    </div>
+document.body.appendChild(box);
 
-    <div id="rkIndicators"
-      style="margin-top:10px;font-size:12px;line-height:1.7">
-    </div>
+const $=x=>box.querySelector(x);
 
-    <div style="margin-top:10px;font-size:11px;color:#9ca3af">
-      Educational signal analysis only
-    </div>
-  `;
+$("#rkX").onclick=()=>box.remove();
 
-  document.body.appendChild(panel);
+function sma(v,p){
+ if(v.length<p)return null;
+ return v.slice(-p).reduce((a,b)=>a+b,0)/p;
+}
 
-  const $ = id => panel.querySelector(id);
+function ema(v,p){
+ if(v.length<p)return null;
+ const k=2/(p+1);
+ let e=v.slice(0,p).reduce((a,b)=>a+b,0)/p;
+ for(let i=p;i<v.length;i++)e=v[i]*k+e*(1-k);
+ return e;
+}
 
-  $("#rkClose").onclick = () => panel.remove();
+function rsi(v,p=14){
+ if(v.length<=p)return null;
+ let gain=0,loss=0;
+ for(let i=v.length-p;i<v.length;i++){
+   const d=v[i]-v[i-1];
+   if(d>0)gain+=d;
+   else loss-=d;
+ }
+ if(loss===0)return 100;
+ return 100-100/(1+gain/loss);
+}
 
-  // --------------------------------------------------
-  // Indicator functions
-  // --------------------------------------------------
+function macd(v){
+ const a=ema(v,12),b=ema(v,26);
+ return a==null||b==null?null:a-b;
+}
 
-  function sma(values, period) {
-    if (values.length < period) return null;
+function boll(v,p=20){
+ if(v.length<p)return null;
+ const x=v.slice(-p);
+ const m=x.reduce((a,b)=>a+b,0)/p;
+ const sd=Math.sqrt(
+   x.reduce((s,n)=>s+(n-m)**2,0)/p
+ );
+ return {mid:m,upper:m+2*sd,lower:m-2*sd};
+}
 
-    let sum = 0;
+function stochastic(c,p=14){
+ if(c.length<p)return null;
+ const x=c.slice(-p);
+ const hi=Math.max(...x.map(a=>a.high));
+ const lo=Math.min(...x.map(a=>a.low));
+ const cl=x.at(-1).close;
+ return hi===lo?50:(cl-lo)/(hi-lo)*100;
+}
 
-    for (let i = values.length - period; i < values.length; i++) {
-      sum += values[i];
-    }
+function atr(c,p=14){
+ if(c.length<=p)return null;
+ const tr=[];
+ for(let i=1;i<c.length;i++){
+   const a=c[i],b=c[i-1];
+   tr.push(Math.max(
+     a.high-a.low,
+     Math.abs(a.high-b.close),
+     Math.abs(a.low-b.close)
+   ));
+ }
+ return sma(tr,p);
+}
 
-    return sum / period;
+function analyse(c){
+
+ const v=c.map(x=>Number(x.close));
+ const price=v.at(-1);
+
+ const RSI=rsi(v);
+ const E9=ema(v,9);
+ const E21=ema(v,21);
+ const E50=ema(v,50);
+ const S50=sma(v,50);
+ const MACD=macd(v);
+ const BB=boll(v);
+ const ST=stochastic(c);
+ const ATR=atr(c);
+
+ let bullish=0,bearish=0;
+
+ if(RSI>55)bullish++;
+ else if(RSI<45)bearish++;
+
+ if(E9>E21)bullish++;
+ else if(E9<E21)bearish++;
+
+ if(E50&&price>E50)bullish++;
+ else if(E50&&price<E50)bearish++;
+
+ if(S50&&price>S50)bullish++;
+ else if(S50&&price<S50)bearish++;
+
+ if(MACD>0)bullish++;
+ else if(MACD<0)bearish++;
+
+ if(BB&&price>BB.mid)bullish++;
+ else if(BB&&price<BB.mid)bearish++;
+
+ if(ST>50)bullish++;
+ else if(ST<50)bearish++;
+
+ let trend="Neutral";
+ if(bullish>=5)trend="Bullish";
+ else if(bearish>=5)trend="Bearish";
+
+ let momentum="Mixed";
+ if(bullish>=5||bearish>=5)momentum="Strong";
+ else if(bullish>=4||bearish>=4)momentum="Moderate";
+
+ let volatility="Unknown";
+ if(ATR!=null){
+   const range=price?ATR/price:0;
+   volatility=range>0.001?"High":"Moderate";
+ }
+
+ return {
+   price,RSI,E9,E21,E50,S50,MACD,BB,ST,ATR,
+   bullish,bearish,trend,momentum,volatility
+ };
+}
+
+/*
+  DATA ADAPTER
+
+  Your permitted market-data source should provide:
+
+  window.RK_MARKET_DATA.getCandles(pair,"1m")
+
+  Example candle:
+  {
+    open:1.1490,
+    high:1.1500,
+    low:1.1488,
+    close:1.1497,
+    time:123456789
   }
 
-  function ema(values, period) {
-    if (values.length < period) return null;
+  The analyzer deliberately does NOT scrape
+  protected account/chart data.
+*/
 
-    const k = 2 / (period + 1);
+async function getData(pair){
 
-    let e = values
-      .slice(0, period)
-      .reduce((a, b) => a + b, 0) / period;
+ if(window.RK_MARKET_DATA &&
+    typeof window.RK_MARKET_DATA.getCandles==="function"){
 
-    for (let i = period; i < values.length; i++) {
-      e = values[i] * k + e * (1 - k);
-    }
+   return await window.RK_MARKET_DATA.getCandles(pair,"1m");
+ }
 
-    return e;
-  }
+ throw new Error(
+   "Market-data adapter not connected. Connect a permitted live FX data source."
+ );
+}
 
-  function rsi(values, period = 14) {
-    if (values.length <= period) return null;
+function n(x,d=5){
+ return x==null?"—":Number(x).toFixed(d);
+}
 
-    let gains = 0;
-    let losses = 0;
+$("#rkGo").onclick=async()=>{
 
-    for (let i = values.length - period; i < values.length; i++) {
-      const d = values[i] - values[i - 1];
+ const pair=$("#rkPair").value;
+ const out=$("#rkOut");
 
-      if (d >= 0) gains += d;
-      else losses -= d;
-    }
+ out.innerHTML=`
+ <div style="padding:12px;background:#1f2937;border-radius:10px">
+ Loading 1-minute market data...
+ </div>`;
 
-    if (losses === 0) return 100;
+ try{
 
-    const rs = gains / losses;
+   const candles=await getData(pair);
 
-    return 100 - 100 / (1 + rs);
-  }
+   if(!Array.isArray(candles)||candles.length<60)
+     throw new Error("At least 60 one-minute candles are required.");
 
-  function macd(values) {
-    const e12 = ema(values, 12);
-    const e26 = ema(values, 26);
+   const r=analyse(candles);
 
-    if (e12 == null || e26 == null) return null;
+   out.innerHTML=`
 
-    return e12 - e26;
-  }
+   <div style="padding:13px;background:#1f2937;border-radius:10px">
 
-  function bollinger(values, period = 20) {
-    if (values.length < period) return null;
+   <div style="font-size:20px;font-weight:bold">
+   ${pair}
+   </div>
 
-    const recent = values.slice(-period);
-    const mean = recent.reduce((a, b) => a + b, 0) / period;
+   <div style="margin-top:5px">
+   Price: <b>${n(r.price)}</b>
+   </div>
 
-    const variance =
-      recent.reduce((s, x) => s + Math.pow(x - mean, 2), 0) /
-      period;
+   <hr style="border-color:#374151">
 
-    const sd = Math.sqrt(variance);
+   <div>Trend:
+   <b>${r.trend}</b></div>
 
-    return {
-      middle: mean,
-      upper: mean + 2 * sd,
-      lower: mean - 2 * sd
-    };
-  }
+   <div>Momentum:
+   <b>${r.momentum}</b></div>
 
-  function stochastic(candles, period = 14) {
-    if (candles.length < period) return null;
+   <div>Volatility:
+   <b>${r.volatility}</b></div>
 
-    const recent = candles.slice(-period);
+   <div style="margin-top:6px">
+   Indicator agreement:
+   <b>${Math.max(r.bullish,r.bearish)}/7</b>
+   </div>
 
-    const high = Math.max(...recent.map(x => x.high));
-    const low = Math.min(...recent.map(x => x.low));
-    const close = recent[recent.length - 1].close;
+   </div>
 
-    if (high === low) return 50;
+   <div style="margin-top:10px;padding:12px;background:#1f2937;border-radius:10px;font-size:12px">
 
-    return ((close - low) / (high - low)) * 100;
-  }
+   <b>7-Indicator Analysis</b><br><br>
 
-  function atr(candles, period = 14) {
-    if (candles.length <= period) return null;
+   RSI(14): ${n(r.RSI,2)}<br>
+   EMA 9: ${n(r.E9)}<br>
+   EMA 21: ${n(r.E21)}<br>
+   MACD: ${n(r.MACD)}<br>
+   Bollinger Mid: ${r.BB?n(r.BB.mid):"—"}<br>
+   Stochastic: ${n(r.ST,2)}<br>
+   SMA 50: ${n(r.S50)}<br>
+   ATR(14): ${n(r.ATR)}
 
-    const trs = [];
+   </div>
 
-    for (let i = 1; i < candles.length; i++) {
-      const c = candles[i];
-      const p = candles[i - 1];
+   <div style="margin-top:10px;padding:10px;background:#172033;border-radius:8px;font-size:11px">
+   This is an indicator-based market analysis, not a guaranteed outcome or trade instruction.
+   </div>
+   `;
 
-      const tr = Math.max(
-        c.high - c.low,
-        Math.abs(c.high - p.close),
-        Math.abs(c.low - p.close)
-      );
+ }catch(e){
 
-      trs.push(tr);
-    }
-
-    return sma(trs, period);
-  }
-
-  // --------------------------------------------------
-  // Signal engine
-  // --------------------------------------------------
-
-  function analyze(candles) {
-
-    if (!Array.isArray(candles) || candles.length < 60) {
-      return {
-        signal: "WAIT",
-        confidence: 0,
-        reason: "Not enough candle data"
-      };
-    }
-
-    const closes = candles.map(c => Number(c.close));
-    const price = closes.at(-1);
-
-    const r = rsi(closes, 14);
-    const e9 = ema(closes, 9);
-    const e21 = ema(closes, 21);
-    const e50 = ema(closes, 50);
-    const s50 = sma(closes, 50);
-    const m = macd(closes);
-    const bb = bollinger(closes, 20);
-    const st = stochastic(candles, 14);
-    const a = atr(candles, 14);
-
-    let up = 0;
-    let down = 0;
-
-    // RSI
-    if (r != null) {
-      if (r > 55 && r < 70) up++;
-      if (r < 45 && r > 30) down++;
-    }
-
-    // EMA 9 / 21
-    if (e9 != null && e21 != null) {
-      if (e9 > e21) up++;
-      if (e9 < e21) down++;
-    }
-
-    // EMA 50
-    if (e50 != null) {
-      if (price > e50) up++;
-      if (price < e50) down++;
-    }
-
-    // SMA 50
-    if (s50 != null) {
-      if (price > s50) up++;
-      if (price < s50) down++;
-    }
-
-    // MACD
-    if (m != null) {
-      if (m > 0) up++;
-      if (m < 0) down++;
-    }
-
-    // Bollinger
-    if (bb) {
-      if (price > bb.middle) up++;
-      if (price < bb.middle) down++;
-    }
-
-    // Stochastic
-    if (st != null) {
-      if (st > 50 && st < 80) up++;
-      if (st < 50 && st > 20) down++;
-    }
-
-    const total = 7;
-
-    const confidence =
-      Math.round((Math.max(up, down) / total) * 100);
-
-    let signal = "WAIT";
-
-    if (up >= 5 && up > down) {
-      signal = "UP";
-    } else if (down >= 5 && down > up) {
-      signal = "DOWN";
-    }
-
-    return {
-      signal,
-      confidence,
-      price,
-      up,
-      down,
-      rsi: r,
-      ema9: e9,
-      ema21: e21,
-      ema50: e50,
-      sma50: s50,
-      macd: m,
-      bollinger: bb,
-      stochastic: st,
-      atr: a
-    };
-  }
-
-  // --------------------------------------------------
-  // Market-data adapter
-  // --------------------------------------------------
-
-  async function getCandles(pair) {
-
-    /*
-      Your permitted market-data source should expose:
-
-      window.RK_MARKET_DATA.getCandles(pair)
-
-      Expected format:
-
-      [
-        {
-          open: ...,
-          high: ...,
-          low: ...,
-          close: ...,
-          time: ...
-        }
-      ]
-    */
-
-    if (
-      window.RK_MARKET_DATA &&
-      typeof window.RK_MARKET_DATA.getCandles === "function"
-    ) {
-      return await window.RK_MARKET_DATA.getCandles(pair);
-    }
-
-    throw new Error(
-      "No permitted market-data adapter found."
-    );
-  }
-
-  // --------------------------------------------------
-  // Analyze button
-  // --------------------------------------------------
-
-  $("#rkAnalyze").onclick = async () => {
-
-    const pair = $("#rkPair").value;
-    const tf = $("#rkTF").value;
-
-    $("#rkResult").innerHTML = "Analyzing...";
-
-    try {
-
-      const candles = await getCandles(pair, tf);
-
-      const result = analyze(candles);
-
-      $("#rkResult").innerHTML = `
-        <div style="font-size:22px;font-weight:bold">
-          ${result.signal}
-        </div>
-
-        <div style="margin-top:5px">
-          Confidence: <b>${result.confidence}%</b>
-        </div>
-
-        <div style="margin-top:5px;font-size:12px">
-          UP votes: ${result.up}/7 |
-          DOWN votes: ${result.down}/7
-        </div>
-
-        <div style="margin-top:5px;font-size:12px">
-          Price: ${Number(result.price).toFixed(6)}
-        </div>
-      `;
-
-      $("#rkIndicators").innerHTML = `
-        <b>Indicators</b><br>
-        RSI(14): ${result.rsi?.toFixed(2) ?? "-"}<br>
-        EMA9: ${result.ema9?.toFixed(6) ?? "-"}<br>
-        EMA21: ${result.ema21?.toFixed(6) ?? "-"}<br>
-        EMA50: ${result.ema50?.toFixed(6) ?? "-"}<br>
-        SMA50: ${result.sma50?.toFixed(6) ?? "-"}<br>
-        MACD: ${result.macd?.toFixed(6) ?? "-"}<br>
-        Stochastic: ${result.stochastic?.toFixed(2) ?? "-"}<br>
-        ATR: ${result.atr?.toFixed(6) ?? "-"}
-      `;
-
-    } catch (err) {
-
-      $("#rkResult").innerHTML = `
-        <div style="color:#fca5a5">
-          ${err.message}
-        </div>
-      `;
-
-      $("#rkIndicators").innerHTML = "";
-    }
-  };
+   out.innerHTML=`
+   <div style="padding:12px;background:#1f2937;border-radius:10px;color:#fca5a5">
+   ${e.message}
+   </div>`;
+ }
+};
 
 })();
